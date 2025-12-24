@@ -148,7 +148,7 @@ export function usePlayerGame() {
     }
   }, []);
 
-  const requestRoll = useCallback((overrideRange?: number) => {
+  const requestRoll = useCallback((overrideRange?: number | null) => {
     playerRef.current?.requestRoll(overrideRange);
   }, []);
 

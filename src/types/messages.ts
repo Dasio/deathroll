@@ -2,8 +2,8 @@ import { GameState } from "./game";
 
 // Player -> Host messages
 export type PlayerMessage =
-  | { type: "JOIN_REQUEST"; name: string; spectator?: boolean; playerId?: string }
-  | { type: "ROLL_REQUEST"; overrideRange?: number }
+  | { type: "JOIN_REQUEST"; name: string; spectator?: boolean | null; playerId?: string | null }
+  | { type: "ROLL_REQUEST"; overrideRange?: number | null }
   | { type: "SET_RANGE"; maxRange: number }
   | { type: "HEARTBEAT" }
   | { type: "STATE_SYNC_REQUEST" };

@@ -192,7 +192,7 @@ export function useHostGame() {
         if (!isPlayerTurn(currentState, player.id)) break;
 
         // Apply range override if provided
-        if (message.overrideRange !== undefined && currentState.currentMaxRoll === currentState.initialMaxRoll) {
+        if (message.overrideRange != null && currentState.currentMaxRoll === currentState.initialMaxRoll) {
           currentState = { ...currentState, currentMaxRoll: message.overrideRange };
         }
 
@@ -320,12 +320,12 @@ export function useHostGame() {
     updateState((prev) => startGame(prev, initialRange));
   }, [updateState]);
 
-  const handleLocalRoll = useCallback((playerId: string, overrideRange?: number) => {
+  const handleLocalRoll = useCallback((playerId: string, overrideRange?: number | null) => {
     let currentState = gameStateRef.current;
     if (!isPlayerTurn(currentState, playerId)) return;
 
     // Apply range override if provided (for combined set-range-and-roll)
-    if (overrideRange !== undefined && currentState.currentMaxRoll === currentState.initialMaxRoll) {
+    if (overrideRange != null && currentState.currentMaxRoll === currentState.initialMaxRoll) {
       currentState = { ...currentState, currentMaxRoll: overrideRange };
     }
 

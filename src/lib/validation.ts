@@ -28,12 +28,13 @@ export const roomCodeSchema = z
 const joinRequestSchema = z.object({
   type: z.literal("JOIN_REQUEST"),
   name: playerNameSchema,
-  spectator: z.boolean().optional(),
+  spectator: z.boolean().nullish(),
+  playerId: z.string().nullish(), // For reconnection
 });
 
 const rollRequestSchema = z.object({
   type: z.literal("ROLL_REQUEST"),
-  overrideRange: z.number().int().positive().max(1000000).optional(),
+  overrideRange: z.number().int().positive().max(1000000).nullish(),
 });
 
 const setRangeSchema = z.object({

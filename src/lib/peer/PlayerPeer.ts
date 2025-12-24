@@ -265,7 +265,7 @@ export class PlayerPeer {
     }
   }
 
-  requestRoll(overrideRange?: number) {
+  requestRoll(overrideRange?: number | null) {
     this.sendToHost({ type: "ROLL_REQUEST", overrideRange });
   }
 
