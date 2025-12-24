@@ -10,9 +10,11 @@ import { RoomCode } from "@/components/game/RoomCode";
 import { PlayerList } from "@/components/game/PlayerList";
 import { RollDisplay } from "@/components/game/RollDisplay";
 import { RollHistory } from "@/components/game/RollHistory";
+import { TeamList } from "@/components/game/TeamList";
 import { getCurrentPlayer } from "@/lib/game/gameLogic";
 import { initializeSounds } from "@/lib/sounds";
 import { SoundToggle } from "@/components/ui/SoundToggle";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
 export default function HostPage() {
   const {
@@ -33,6 +35,10 @@ export default function HostPage() {
     endGame,
     restoreSavedState,
     discardSavedState,
+    createTeam,
+    removeTeam,
+    assignPlayerToTeam,
+    setTeamMode,
   } = useHostGame();
 
   const [newPlayerName, setNewPlayerName] = useState("");
@@ -40,6 +46,12 @@ export default function HostPage() {
   const [customRange, setCustomRange] = useState<number | null>(null);
   const [showLoserNotification, setShowLoserNotification] = useState(false);
   const [notificationLoserId, setNotificationLoserId] = useState<string | null>(null);
+  const [isRolling, setIsRolling] = useState(false);
+
+  // Team mode state
+  const [newTeamName, setNewTeamName] = useState("");
+  const [newTeamColor, setNewTeamColor] = useState("#3b82f6");
+  const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
 
   // Handle animation completion - show loser notification after dice animation
   const handleAnimationComplete = useCallback(() => {
@@ -56,6 +68,34 @@ export default function HostPage() {
       setNotificationLoserId(null);
     }
   }, [gameState.lastLoserId]);
+
+  // Compute derived state
+  const currentPlayer = getCurrentPlayer(gameState);
+  const lastLoser = gameState.players.find((p) => p.id === notificationLoserId);
+  const canSetRange = gameState.currentMaxRoll === gameState.initialMaxRoll;
+
+  // Keyboard shortcuts for rolling
+  useEffect(() => {
+    if (gameState.phase !== "playing") return;
+
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // Only handle space or enter when it's a local player's turn
+      if ((e.key === " " || e.key === "Enter") && currentPlayer?.isLocal && !isRolling) {
+        e.preventDefault();
+        setIsRolling(true);
+        initializeSounds();
+        const rangeToUse = canSetRange && customRange && customRange !== gameState.currentMaxRoll
+          ? customRange
+          : undefined;
+        localRoll(currentPlayer.id, rangeToUse);
+        setCustomRange(null);
+        setTimeout(() => setIsRolling(false), 500);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyPress);
+    return () => window.removeEventListener("keydown", handleKeyPress);
+  }, [gameState.phase, currentPlayer, isRolling, canSetRange, customRange, gameState.currentMaxRoll, localRoll]);
 
   useEffect(() => {
     let mounted = true;
@@ -74,10 +114,6 @@ export default function HostPage() {
       setNewPlayerName("");
     }
   };
-
-  const currentPlayer = getCurrentPlayer(gameState);
-  const lastLoser = gameState.players.find((p) => p.id === notificationLoserId);
-  const canSetRange = gameState.currentMaxRoll === gameState.initialMaxRoll;
 
   // Show resume prompt if saved state exists
   if (savedState && !roomCode) {
@@ -125,7 +161,8 @@ export default function HostPage() {
     return (
       <main className="min-h-screen flex items-center justify-center p-4">
         <Card className="text-center">
-          <div className="animate-pulse text-xl">Creating room...</div>
+          <LoadingSpinner size="lg" />
+          <div className="text-xl mt-4">Creating room...</div>
         </Card>
       </main>
     );
@@ -156,12 +193,14 @@ export default function HostPage() {
             &larr; Back
           </Link>
           <h1 className="text-2xl font-bold">Host Game</h1>
-          <div />
+          <Link href="/stats" className="text-[var(--accent)] hover:underline text-sm">
+            Stats
+          </Link>
         </div>
 
         {roomCode && (
           <Card className="mb-6">
-            <RoomCode code={roomCode} />
+            <RoomCode code={roomCode} playerCount={gameState.players.length} />
           </Card>
         )}
 
@@ -196,17 +235,172 @@ export default function HostPage() {
 
         <Card className="mb-6">
           <h2 className="text-lg font-semibold mb-4">Game Settings</h2>
-          <div className="flex items-center gap-4">
-            <label className="text-[var(--muted)]">Starting Range:</label>
-            <Input
-              type="number"
-              min={2}
-              value={initialRange}
-              onChange={(e) => setInitialRange(Number(e.target.value))}
-              className="w-40 text-center"
-            />
+          <div className="space-y-4">
+            <div className="flex items-center gap-4">
+              <label className="text-[var(--muted)]">Starting Range:</label>
+              <Input
+                type="number"
+                min={2}
+                value={initialRange}
+                onChange={(e) => setInitialRange(Number(e.target.value))}
+                className="w-40 text-center"
+              />
+            </div>
+
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="teamMode"
+                checked={gameState.teamMode}
+                onChange={(e) => setTeamMode(e.target.checked)}
+                className="w-4 h-4 rounded border-[var(--border)] bg-[var(--background)] text-[var(--accent)] focus:ring-[var(--accent)]"
+              />
+              <label htmlFor="teamMode" className="text-[var(--muted)]">
+                Team Mode (allow any team combination: 1v2v3, 2v2, etc.)
+              </label>
+            </div>
           </div>
         </Card>
+
+        {/* Team Setup */}
+        {gameState.teamMode && (
+          <Card className="mb-6">
+            <h2 className="text-lg font-semibold mb-4">Team Setup</h2>
+
+            {/* Create Team */}
+            <div className="mb-4 p-3 bg-[var(--background)] rounded border border-[var(--border)]">
+              <h3 className="text-sm font-semibold mb-2">Create New Team</h3>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Team name"
+                  value={newTeamName}
+                  onChange={(e) => setNewTeamName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newTeamName.trim()) {
+                      createTeam(newTeamName.trim(), newTeamColor);
+                      setNewTeamName("");
+                      setNewTeamColor("#3b82f6");
+                    }
+                  }}
+                  className="flex-1"
+                />
+                <input
+                  type="color"
+                  value={newTeamColor}
+                  onChange={(e) => setNewTeamColor(e.target.value)}
+                  className="w-12 h-10 rounded cursor-pointer"
+                />
+                <Button
+                  onClick={() => {
+                    if (newTeamName.trim()) {
+                      createTeam(newTeamName.trim(), newTeamColor);
+                      setNewTeamName("");
+                      setNewTeamColor("#3b82f6");
+                    }
+                  }}
+                  disabled={!newTeamName.trim()}
+                  size="sm"
+                >
+                  Create
+                </Button>
+              </div>
+            </div>
+
+            {/* Assign Players to Teams */}
+            {gameState.teams.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold mb-2">Assign Players</h3>
+                <p className="text-xs text-[var(--muted)] mb-2">
+                  Click on a player, then click on a team to assign them
+                </p>
+
+                {/* Unassigned players */}
+                <div className="mb-3">
+                  <div className="text-xs font-semibold text-[var(--muted)] mb-1">
+                    Unassigned Players:
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {gameState.players
+                      .filter((p) => !p.teamId && !p.isSpectator)
+                      .map((player) => (
+                        <button
+                          key={player.id}
+                          onClick={() => setSelectedPlayerId(player.id)}
+                          className={`px-3 py-1 rounded text-sm border-2 transition-colors ${
+                            selectedPlayerId === player.id
+                              ? "border-[var(--accent)] bg-[var(--accent)]/20"
+                              : "border-[var(--border)] hover:border-[var(--accent)]/50"
+                          }`}
+                          style={{ borderLeftColor: player.color, borderLeftWidth: "4px" }}
+                        >
+                          {player.emoji} {player.name}
+                        </button>
+                      ))}
+                    {gameState.players.filter((p) => !p.teamId && !p.isSpectator).length === 0 && (
+                      <span className="text-xs text-[var(--muted)] italic">
+                        All players assigned
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Teams */}
+                <div className="space-y-2">
+                  {gameState.teams.map((team) => (
+                    <button
+                      key={team.id}
+                      onClick={() => {
+                        if (selectedPlayerId) {
+                          assignPlayerToTeam(selectedPlayerId, team.id);
+                          setSelectedPlayerId(null);
+                        }
+                      }}
+                      disabled={!selectedPlayerId}
+                      className={`w-full p-3 rounded border-2 text-left transition-colors ${
+                        selectedPlayerId
+                          ? "border-[var(--accent)] hover:bg-[var(--accent)]/10 cursor-pointer"
+                          : "border-[var(--border)] cursor-default"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="w-4 h-4 rounded-full"
+                            style={{ backgroundColor: team.color }}
+                          />
+                          <span className="font-semibold">{team.name}</span>
+                          <span className="text-xs text-[var(--muted)]">
+                            ({gameState.players.filter((p) => p.teamId === team.id).length}{" "}
+                            players)
+                          </span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeTeam(team.id);
+                          }}
+                          className="text-xs text-[var(--danger)] hover:underline"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Team Preview */}
+            {gameState.teams.length > 0 && (
+              <TeamList
+                teams={gameState.teams}
+                players={gameState.players}
+                onRemoveTeam={removeTeam}
+                onUnassignPlayer={(playerId) => assignPlayerToTeam(playerId, undefined)}
+              />
+            )}
+          </Card>
+        )}
 
         <Button
           size="lg"
@@ -280,20 +474,23 @@ export default function HostPage() {
             )}
 
             {currentIsLocal && (
-              <Button
-                size="lg"
-                onClick={() => {
-                  initializeSounds();
-                  const rangeToUse = canSetRange && customRange && customRange !== gameState.currentMaxRoll
-                    ? customRange
-                    : undefined;
-                  localRoll(currentPlayer.id, rangeToUse);
-                  setCustomRange(null);
-                }}
-                className="px-12"
-              >
-                ROLL (1-{(canSetRange && customRange ? customRange : gameState.currentMaxRoll).toLocaleString()})
-              </Button>
+              <>
+                <Button
+                  size="lg"
+                  onClick={() => {
+                    initializeSounds();
+                    const rangeToUse = canSetRange && customRange && customRange !== gameState.currentMaxRoll
+                      ? customRange
+                      : undefined;
+                    localRoll(currentPlayer.id, rangeToUse);
+                    setCustomRange(null);
+                  }}
+                  className="px-12"
+                >
+                  ROLL (1-{(canSetRange && customRange ? customRange : gameState.currentMaxRoll).toLocaleString()})
+                </Button>
+                <div className="text-xs text-[var(--muted)] mt-2">Press Space to roll</div>
+              </>
             )}
 
             {!currentIsLocal && (
@@ -305,13 +502,23 @@ export default function HostPage() {
 
       <Card className="mb-6">
         <h2 className="text-lg font-semibold mb-4">Scoreboard</h2>
-        <PlayerList
-          players={gameState.players}
-          currentPlayerId={currentPlayer?.id}
-          lastLoserId={showLoserNotification ? notificationLoserId ?? undefined : undefined}
-          showScores
-          onKick={(id) => kickPlayer(id)}
-        />
+        {gameState.teamMode && gameState.teams.length > 0 ? (
+          <TeamList
+            teams={gameState.teams}
+            players={gameState.players}
+            currentPlayerId={currentPlayer?.id}
+            lastLoserTeamId={showLoserNotification ? gameState.lastLoserTeamId ?? undefined : undefined}
+            showScores
+          />
+        ) : (
+          <PlayerList
+            players={gameState.players}
+            currentPlayerId={currentPlayer?.id}
+            lastLoserId={showLoserNotification ? notificationLoserId ?? undefined : undefined}
+            showScores
+            onKick={(id) => kickPlayer(id)}
+          />
+        )}
       </Card>
 
       <Card className="mb-6">

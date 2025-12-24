@@ -18,6 +18,10 @@ import {
   processRoll,
   resetGame,
   isPlayerTurn,
+  createTeam,
+  removeTeam,
+  assignPlayerToTeam,
+  setTeamMode,
 } from "@/lib/game/gameLogic";
 import { PlayerMessage } from "@/types/messages";
 import {
@@ -27,8 +31,13 @@ import {
   SavedHostState,
 } from "@/lib/storage";
 import { assignAvatar } from "@/lib/avatars";
+import { playerNameSchema } from "@/lib/validation";
+import { trackRoll, trackGameEnd, calculateDeficitOvercome } from "@/lib/statistics";
 
 export function useHostGame() {
+  // Track game start time for duration calculation
+  const gameStartTimeRef = useRef<number | null>(null);
+  const roundStartTimeRef = useRef<number | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [gameState, setGameState] = useState<GameState>(createInitialGameState());
@@ -103,32 +112,40 @@ export function useHostGame() {
         }
       },
       onPlayerJoinRequest: (peerId, name, spectator, accept, reject) => {
-        const currentState = gameStateRef.current;
-
-        // Check for duplicate names among connected players
-        if (currentState.players.some((p) => p.name === name && p.isConnected)) {
-          reject("Name already taken");
+        // Validate player name
+        const nameValidation = playerNameSchema.safeParse(name);
+        if (!nameValidation.success) {
+          reject(nameValidation.error.issues[0]?.message || "Invalid player name");
           return;
         }
 
-        // Accept the player (allowed to join mid-game)
-        accept();
-
         const playerId = `remote-${peerId}`;
-        const avatar = assignAvatar(currentState.players);
-        const player: Player = {
-          id: playerId,
-          name,
-          isLocal: false,
-          isConnected: true,
-          connectionId: peerId,
-          losses: 0,
-          isSpectator: spectator,
-          color: avatar.color,
-          emoji: avatar.emoji,
-        };
 
+        // Atomic duplicate check and add using functional state update
         setGameState((prev) => {
+          // Re-check for duplicates with the most current state
+          if (prev.players.some((p) => p.name === name && p.isConnected)) {
+            // Duplicate found - reject
+            reject("Name already taken");
+            return prev; // Don't change state
+          }
+
+          // No duplicate - accept and add the player
+          accept();
+
+          const avatar = assignAvatar(prev.players);
+          const player: Player = {
+            id: playerId,
+            name,
+            isLocal: false,
+            isConnected: true,
+            connectionId: peerId,
+            losses: 0,
+            isSpectator: spectator,
+            color: avatar.color,
+            emoji: avatar.emoji,
+          };
+
           const newState = addPlayer(prev, player);
           host.acceptPlayer(peerId, playerId, newState);
           host.broadcastState(newState);
@@ -181,6 +198,60 @@ export function useHostGame() {
 
         const newState = processRoll(currentState, player.id);
         console.log("[Host] Remote roll result:", newState.lastRoll, "max was:", newState.lastMaxRoll);
+
+        // Track roll in statistics
+        if (newState.lastRoll !== null && newState.lastMaxRoll !== null) {
+          trackRoll(player.id, newState.lastRoll, newState.lastMaxRoll);
+        }
+
+        // Track game end if someone lost (rolled a 1)
+        if (newState.lastLoserId) {
+          const loser = newState.players.find((p) => p.id === newState.lastLoserId);
+          const activePlayers = newState.players.filter((p) => !p.isSpectator);
+
+          if (loser && roundStartTimeRef.current) {
+            const duration = Date.now() - roundStartTimeRef.current;
+            const rollCount = newState.rollHistory.filter(
+              (r) => r.timestamp >= roundStartTimeRef.current!
+            ).length;
+
+            // Calculate deficit overcome (for comeback tracking)
+            const otherPlayersLosses = activePlayers
+              .filter((p) => p.id !== loser.id)
+              .map((p) => p.losses);
+            const minOtherLosses = otherPlayersLosses.length > 0 ? Math.min(...otherPlayersLosses) : 0;
+            const deficitOvercome = calculateDeficitOvercome(loser.losses - 1, minOtherLosses);
+
+            // Track loss for this player
+            trackGameEnd({
+              playerId: loser.id,
+              playerName: loser.name,
+              won: false,
+              rollCount,
+              duration,
+              timestamp: Date.now(),
+            });
+
+            // Track wins for other players
+            activePlayers
+              .filter((p) => p.id !== loser.id)
+              .forEach((p) => {
+                trackGameEnd({
+                  playerId: p.id,
+                  playerName: p.name,
+                  won: true,
+                  rollCount,
+                  duration,
+                  deficitOvercome: p.id === player.id ? deficitOvercome : 0,
+                  timestamp: Date.now(),
+                });
+              });
+
+            // Reset round start time for next round
+            roundStartTimeRef.current = Date.now();
+          }
+        }
+
         setGameState(newState);
         host.broadcastState(newState);
         break;
@@ -204,6 +275,22 @@ export function useHostGame() {
   }, []);
 
   const addLocalPlayer = useCallback((name: string) => {
+    // Validate player name
+    const nameValidation = playerNameSchema.safeParse(name);
+    if (!nameValidation.success) {
+      setError(nameValidation.error.issues[0]?.message || "Invalid player name");
+      return;
+    }
+
+    // Check for duplicate names
+    if (gameStateRef.current.players.some((p) => p.name === name)) {
+      setError("Name already taken");
+      return;
+    }
+
+    // Clear any previous errors
+    setError(null);
+
     const playerId = `local-${Date.now()}`;
     setGameState((prev) => {
       const avatar = assignAvatar(prev.players);
@@ -228,6 +315,8 @@ export function useHostGame() {
   }, [updateState]);
 
   const handleStartGame = useCallback((initialRange: number = 100) => {
+    gameStartTimeRef.current = Date.now();
+    roundStartTimeRef.current = Date.now();
     updateState((prev) => startGame(prev, initialRange));
   }, [updateState]);
 
@@ -242,6 +331,60 @@ export function useHostGame() {
 
     const newState = processRoll(currentState, playerId);
     console.log("[Host] Local roll result:", newState.lastRoll, "max was:", newState.lastMaxRoll);
+
+    // Track roll in statistics
+    if (newState.lastRoll !== null && newState.lastMaxRoll !== null) {
+      trackRoll(playerId, newState.lastRoll, newState.lastMaxRoll);
+    }
+
+    // Track game end if someone lost (rolled a 1)
+    if (newState.lastLoserId) {
+      const player = newState.players.find((p) => p.id === newState.lastLoserId);
+      const activePlayers = newState.players.filter((p) => !p.isSpectator);
+
+      if (player && roundStartTimeRef.current) {
+        const duration = Date.now() - roundStartTimeRef.current;
+        const rollCount = newState.rollHistory.filter(
+          (r) => r.timestamp >= roundStartTimeRef.current!
+        ).length;
+
+        // Calculate deficit overcome (for comeback tracking)
+        const otherPlayersLosses = activePlayers
+          .filter((p) => p.id !== player.id)
+          .map((p) => p.losses);
+        const minOtherLosses = otherPlayersLosses.length > 0 ? Math.min(...otherPlayersLosses) : 0;
+        const deficitOvercome = calculateDeficitOvercome(player.losses - 1, minOtherLosses);
+
+        // Track loss for this player
+        trackGameEnd({
+          playerId: player.id,
+          playerName: player.name,
+          won: false,
+          rollCount,
+          duration,
+          timestamp: Date.now(),
+        });
+
+        // Track wins for other players
+        activePlayers
+          .filter((p) => p.id !== player.id)
+          .forEach((p) => {
+            trackGameEnd({
+              playerId: p.id,
+              playerName: p.name,
+              won: true,
+              rollCount,
+              duration,
+              deficitOvercome: p.id === playerId ? deficitOvercome : 0,
+              timestamp: Date.now(),
+            });
+          });
+
+        // Reset round start time for next round
+        roundStartTimeRef.current = Date.now();
+      }
+    }
+
     setGameState(newState);
     hostRef.current?.broadcastState(newState);
   }, []);
@@ -323,32 +466,40 @@ export function useHostGame() {
         }
       },
       onPlayerJoinRequest: (peerId, name, spectator, accept, reject) => {
-        const currentState = gameStateRef.current;
-
-        // Check for duplicate names among connected players
-        if (currentState.players.some((p) => p.name === name && p.isConnected)) {
-          reject("Name already taken");
+        // Validate player name
+        const nameValidation = playerNameSchema.safeParse(name);
+        if (!nameValidation.success) {
+          reject(nameValidation.error.issues[0]?.message || "Invalid player name");
           return;
         }
 
-        // Accept the player (allowed to join mid-game)
-        accept();
-
         const playerId = `remote-${peerId}`;
-        const avatar = assignAvatar(currentState.players);
-        const player: Player = {
-          id: playerId,
-          name,
-          isLocal: false,
-          isConnected: true,
-          connectionId: peerId,
-          losses: 0,
-          isSpectator: spectator,
-          color: avatar.color,
-          emoji: avatar.emoji,
-        };
 
+        // Atomic duplicate check and add using functional state update
         setGameState((prev) => {
+          // Re-check for duplicates with the most current state
+          if (prev.players.some((p) => p.name === name && p.isConnected)) {
+            // Duplicate found - reject
+            reject("Name already taken");
+            return prev; // Don't change state
+          }
+
+          // No duplicate - accept and add the player
+          accept();
+
+          const avatar = assignAvatar(prev.players);
+          const player: Player = {
+            id: playerId,
+            name,
+            isLocal: false,
+            isConnected: true,
+            connectionId: peerId,
+            losses: 0,
+            isSpectator: spectator,
+            color: avatar.color,
+            emoji: avatar.emoji,
+          };
+
           const newState = addPlayer(prev, player);
           host.acceptPlayer(peerId, playerId, newState);
           host.broadcastState(newState);
@@ -389,6 +540,22 @@ export function useHostGame() {
     setSavedState(null);
   }, []);
 
+  const handleCreateTeam = useCallback((name: string, color: string) => {
+    updateState((prev) => createTeam(prev, name, color));
+  }, [updateState]);
+
+  const handleRemoveTeam = useCallback((teamId: string) => {
+    updateState((prev) => removeTeam(prev, teamId));
+  }, [updateState]);
+
+  const handleAssignPlayerToTeam = useCallback((playerId: string, teamId: string | undefined) => {
+    updateState((prev) => assignPlayerToTeam(prev, playerId, teamId));
+  }, [updateState]);
+
+  const handleSetTeamMode = useCallback((enabled: boolean) => {
+    updateState((prev) => setTeamMode(prev, enabled));
+  }, [updateState]);
+
   return {
     roomCode,
     status,
@@ -407,5 +574,9 @@ export function useHostGame() {
     endGame,
     restoreSavedState,
     discardSavedState,
+    createTeam: handleCreateTeam,
+    removeTeam: handleRemoveTeam,
+    assignPlayerToTeam: handleAssignPlayerToTeam,
+    setTeamMode: handleSetTeamMode,
   };
 }

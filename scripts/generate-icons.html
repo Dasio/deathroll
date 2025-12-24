@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Generate PWA Icons</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #f0f0f0;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    canvas {
+      border: 1px solid #ddd;
+      margin: 20px 0;
+      display: block;
+    }
+    button {
+      background: #dc2626;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 5px;
+    }
+    button:hover {
+      background: #b91c1c;
+    }
+    .downloads {
+      margin-top: 20px;
+    }
+    h2 {
+      color: #333;
+      margin-top: 30px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>DeathRoll PWA Icon Generator</h1>
+    <p>Click the buttons below to download the PWA icons:</p>
+
+    <h2>192x192 Icon</h2>
+    <canvas id="canvas192" width="192" height="192"></canvas>
+    <button onclick="downloadIcon(192)">Download 192x192 PNG</button>
+
+    <h2>512x512 Icon</h2>
+    <canvas id="canvas512" width="512" height="512"></canvas>
+    <button onclick="downloadIcon(512)">Download 512x512 PNG</button>
+
+    <div class="downloads">
+      <h3>Instructions:</h3>
+      <ol>
+        <li>Click each download button to save the icons</li>
+        <li>Save them as <code>icon-192.png</code> and <code>icon-512.png</code></li>
+        <li>Place them in your <code>public/</code> directory</li>
+      </ol>
+    </div>
+  </div>
+
+  <script>
+    function drawDiceIcon(ctx, size) {
+      // Background
+      ctx.fillStyle = '#0a0a0a';
+      roundRect(ctx, 0, 0, size, size, size * 0.2);
+      ctx.fill();
+
+      // Dice body
+      const padding = size * 0.1875; // 36/192 or 96/512
+      const diceSize = size * 0.625; // 120/192 or 320/512
+      const radius = size * 0.083; // 16/192 or 40/512
+
+      ctx.fillStyle = '#dc2626';
+      roundRect(ctx, padding, padding, diceSize, diceSize, radius);
+      ctx.fill();
+
+      // Dice border
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = size * 0.015625; // 3/192 or 8/512
+      ctx.stroke();
+
+      // Dot (showing 1)
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(size / 2, size / 2, size * 0.09375, 0, Math.PI * 2); // 18/192 or 48/512
+      ctx.fill();
+
+      // Shine effect
+      const gradient = ctx.createLinearGradient(
+        padding,
+        padding,
+        padding + diceSize * 0.33,
+        padding + diceSize * 0.33
+      );
+      gradient.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
+      gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+      ctx.fillStyle = gradient;
+      roundRect(
+        ctx,
+        padding + size * 0.026,
+        padding + size * 0.026,
+        diceSize * 0.33,
+        diceSize * 0.33,
+        radius * 0.5
+      );
+      ctx.fill();
+    }
+
+    function roundRect(ctx, x, y, width, height, radius) {
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + width - radius, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      ctx.lineTo(x + width, y + height - radius);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      ctx.lineTo(x + radius, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+    }
+
+    function downloadIcon(size) {
+      const canvas = document.getElementById(`canvas${size}`);
+      const link = document.createElement('a');
+      link.download = `icon-${size}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    }
+
+    // Draw icons on page load
+    window.addEventListener('load', () => {
+      const canvas192 = document.getElementById('canvas192');
+      const ctx192 = canvas192.getContext('2d');
+      drawDiceIcon(ctx192, 192);
+
+      const canvas512 = document.getElementById('canvas512');
+      const ctx512 = canvas512.getContext('2d');
+      drawDiceIcon(ctx512, 512);
+    });
+  </script>
+</body>
+</html>

@@ -2,6 +2,8 @@ import Peer, { DataConnection } from "peerjs";
 import { peerConfig, getRoomPeerId } from "./config";
 import { PlayerMessage, HostMessage } from "@/types/messages";
 import { GameState } from "@/types/game";
+import { safeParsePlayerMessage } from "../validation";
+import { logger } from "../logger";
 
 export type ConnectionStatus = "connecting" | "open" | "error" | "closed";
 
@@ -83,27 +85,35 @@ export class HostPeer {
   }
 
   private handleNewConnection(conn: DataConnection) {
-    console.log("[Host] New connection from:", conn.peer);
+    logger.debug("[Host] New connection from:", conn.peer);
 
     conn.on("open", () => {
-      console.log("[Host] Connection opened:", conn.peer);
+      logger.debug("[Host] Connection opened:", conn.peer);
     });
 
     conn.on("data", (data) => {
-      console.log("[Host] Received data from:", conn.peer, data);
-      const message = data as PlayerMessage;
-      this.handlePlayerMessage(conn, message);
+      logger.debug("[Host] Received data from:", conn.peer, data);
+
+      // Validate incoming message
+      const result = safeParsePlayerMessage(data);
+      if (!result.success) {
+        logger.error("[Host] Invalid message from player:", conn.peer, result.error);
+        this.callbacks.onError(new Error(`Invalid message from player: ${result.error.message}`));
+        return;
+      }
+
+      this.handlePlayerMessage(conn, result.data);
     });
 
     conn.on("close", () => {
-      console.log("[Host] Connection closed:", conn.peer);
+      logger.debug("[Host] Connection closed:", conn.peer);
       const peerId = conn.peer;
       this.connections.delete(peerId);
       this.callbacks.onPlayerDisconnect(peerId);
     });
 
     conn.on("error", (err) => {
-      console.error("[Host] Connection error:", conn.peer, err);
+      logger.error("[Host] Connection error:", conn.peer, err);
       this.callbacks.onError(err);
     });
   }
@@ -142,6 +152,12 @@ export class HostPeer {
 
       case "HEARTBEAT":
         this.sendTo(conn, { type: "HEARTBEAT_ACK" });
+        break;
+
+      case "STATE_SYNC_REQUEST":
+        // Player requesting state sync after reconnection
+        // This will be handled by the game logic to send current state
+        this.callbacks.onPlayerMessage(peerId, message);
         break;
 
       default:

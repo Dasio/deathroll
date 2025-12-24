@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { Player } from "@/types/game";
 
 interface PlayerListProps {
@@ -12,7 +13,7 @@ interface PlayerListProps {
   onKick?: (playerId: string) => void;
 }
 
-export function PlayerList({
+export const PlayerList = memo(function PlayerList({
   players,
   currentPlayerId,
   myPlayerId,
@@ -184,4 +185,4 @@ export function PlayerList({
       )}
     </div>
   );
-}
+});

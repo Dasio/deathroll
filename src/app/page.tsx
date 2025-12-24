@@ -69,8 +69,13 @@ export default function Home() {
         </Card>
       </div>
 
-      <footer className="mt-12 text-[var(--muted)] text-sm">
-        P2P multiplayer - no server required
+      <footer className="mt-12 text-center space-y-2">
+        <Link href="/stats" className="text-[var(--accent)] hover:underline text-sm block">
+          View Statistics
+        </Link>
+        <p className="text-[var(--muted)] text-sm">
+          P2P multiplayer - no server required
+        </p>
       </footer>
     </main>
   );

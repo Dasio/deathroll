@@ -8,6 +8,14 @@ export interface Player {
   isSpectator: boolean;
   color: string; // hex color for avatar
   emoji: string; // emoji avatar
+  teamId?: string; // optional team assignment
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  color: string;
+  losses: number;
 }
 
 export interface RollEntry {
@@ -23,6 +31,8 @@ export interface RollEntry {
 export interface GameState {
   phase: "lobby" | "playing";
   players: Player[];
+  teams: Team[]; // Team definitions
+  teamMode: boolean; // Whether team mode is enabled
   currentPlayerIndex: number;
   currentMaxRoll: number;
   initialMaxRoll: number;
@@ -31,6 +41,7 @@ export interface GameState {
   lastRollPlayerId: string | null; // Who made the last roll
   rollHistory: RollEntry[];
   lastLoserId: string | null; // Who just lost (for brief display)
+  lastLoserTeamId: string | null; // Which team just lost (for team mode)
   roundNumber: number;
 }
 
@@ -38,6 +49,8 @@ export function createInitialGameState(): GameState {
   return {
     phase: "lobby",
     players: [],
+    teams: [],
+    teamMode: false,
     currentPlayerIndex: 0,
     currentMaxRoll: 100,
     initialMaxRoll: 100,
@@ -46,6 +59,7 @@ export function createInitialGameState(): GameState {
     lastRollPlayerId: null,
     rollHistory: [],
     lastLoserId: null,
+    lastLoserTeamId: null,
     roundNumber: 1,
   };
 }

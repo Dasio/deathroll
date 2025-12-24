@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, memo } from "react";
 import {
   playDiceRollSound,
   playDeathSound,
@@ -15,7 +15,7 @@ interface RollDisplayProps {
   onAnimationComplete?: () => void;
 }
 
-export function RollDisplay({
+export const RollDisplay = memo(function RollDisplay({
   currentMax,
   lastRoll,
   lastMaxRoll,
@@ -97,4 +97,4 @@ export function RollDisplay({
       )}
     </div>
   );
-}
+});

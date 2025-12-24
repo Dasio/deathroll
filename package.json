@@ -4,16 +4,19 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npm run pwa:init && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "pwa:init": "node scripts/pwa-init.js",
+    "generate-icons": "node scripts/create-placeholder-pngs.js"
   },
   "dependencies": {
     "next": "16.1.0",
     "peerjs": "^1.5.5",
     "qrcode.react": "^4.2.0",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "zod": "^4.2.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
