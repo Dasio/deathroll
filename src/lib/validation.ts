@@ -46,11 +46,16 @@ const heartbeatSchema = z.object({
   type: z.literal("HEARTBEAT"),
 });
 
+const stateSyncRequestSchema = z.object({
+  type: z.literal("STATE_SYNC_REQUEST"),
+});
+
 export const playerMessageSchema = z.discriminatedUnion("type", [
   joinRequestSchema,
   rollRequestSchema,
   setRangeSchema,
   heartbeatSchema,
+  stateSyncRequestSchema,
 ]);
 
 /**
@@ -133,7 +138,12 @@ export function parseHostMessage(data: unknown) {
  * Safe parse with error details
  */
 export function safeParsePlayerMessage(data: unknown) {
-  return playerMessageSchema.safeParse(data);
+  console.log("[Validation] Parsing player message:", JSON.stringify(data, null, 2));
+  const result = playerMessageSchema.safeParse(data);
+  if (!result.success) {
+    console.error("[Validation] Schema validation failed:", result.error);
+  }
+  return result;
 }
 
 export function safeParseHostMessage(data: unknown) {

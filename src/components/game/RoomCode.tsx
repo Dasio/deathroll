@@ -25,7 +25,8 @@ export function RoomCode({ code, showQR = true, playerCount }: RoomCodeProps) {
 
   const copyToClipboard = async () => {
     try {
-      await navigator.clipboard.writeText(code);
+      // Copy the full join URL instead of just the code
+      await navigator.clipboard.writeText(joinUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
@@ -74,7 +75,7 @@ export function RoomCode({ code, showQR = true, playerCount }: RoomCodeProps) {
           )}
         </button>
       </div>
-      <div className="text-xs text-[var(--muted)] mt-1">Click to copy</div>
+      <div className="text-xs text-[var(--muted)] mt-1">Click to copy join link</div>
 
       {showQR && joinUrl && (
         <div className="mt-6 flex justify-center">
