@@ -11,8 +11,16 @@ interface RoomCodeProps {
 
 export function RoomCode({ code, showQR = true, playerCount }: RoomCodeProps) {
   const [copied, setCopied] = useState(false);
+
+  // Build join URL with proper base path support
   const joinUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/play?room=${code}`
+    ? (() => {
+        const origin = window.location.origin;
+        const pathname = window.location.pathname;
+        // Extract base path from current pathname (e.g., /deathroll/host -> /deathroll)
+        const basePath = pathname.split('/')[1] ? `/${pathname.split('/')[1]}` : '';
+        return `${origin}${basePath}/play?room=${code}`;
+      })()
     : "";
 
   const copyToClipboard = async () => {

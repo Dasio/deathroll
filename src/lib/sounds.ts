@@ -73,8 +73,8 @@ export function setSoundEnabled(enabled: boolean): void {
 }
 
 /**
- * Play a dice roll sound (short clicking/rattling)
- * Quick, percussive sound that simulates dice tumbling
+ * Play a dice roll sound (gentle tumbling)
+ * Soft, pleasant sound that simulates dice rolling
  */
 export function playDiceRollSound(): void {
   if (!isEnabled) return;
@@ -84,25 +84,28 @@ export function playDiceRollSound(): void {
 
   const now = ctx.currentTime;
 
-  // Create multiple short clicks in rapid succession for a "rattle" effect
-  for (let i = 0; i < 5; i++) {
+  // Create 3 soft clicks with pleasant frequencies
+  const frequencies = [400, 500, 450];
+
+  frequencies.forEach((freq, i) => {
     const oscillator = ctx.createOscillator();
     const gainNode = ctx.createGain();
 
     oscillator.connect(gainNode);
     gainNode.connect(ctx.destination);
 
-    // White noise-ish sound with varying frequency
-    oscillator.type = "square";
-    oscillator.frequency.setValueAtTime(200 + Math.random() * 400, now + i * 0.02);
+    // Use sine wave for softer, more pleasant tone
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(freq, now + i * 0.04);
 
-    // Very short envelope for click
-    gainNode.gain.setValueAtTime(0.1, now + i * 0.02);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, now + i * 0.02 + 0.015);
+    // Gentle envelope with lower volume
+    gainNode.gain.setValueAtTime(0, now + i * 0.04);
+    gainNode.gain.linearRampToValueAtTime(0.05, now + i * 0.04 + 0.01);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, now + i * 0.04 + 0.06);
 
-    oscillator.start(now + i * 0.02);
-    oscillator.stop(now + i * 0.02 + 0.02);
-  }
+    oscillator.start(now + i * 0.04);
+    oscillator.stop(now + i * 0.04 + 0.07);
+  });
 }
 
 /**
