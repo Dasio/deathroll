@@ -65,7 +65,13 @@ export const RollDisplay = memo(function RollDisplay({
             playDeathSound();
           }
           // Show MAX ROLL if rolled the maximum value
-          if (lastRoll === animationMaxRef.current) {
+          console.log("[RollDisplay] Checking max roll:", {
+            lastRoll,
+            animationMax: animationMaxRef.current,
+            isMax: lastRoll === animationMaxRef.current,
+          });
+          if (lastRoll === animationMaxRef.current && animationMaxRef.current > 1) {
+            console.log("[RollDisplay] MAX ROLL detected!");
             setShowMaxRoll(true);
             vibrateMaxRoll();
             playMaxRollSound();

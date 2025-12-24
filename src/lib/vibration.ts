@@ -16,8 +16,8 @@ export const VibrationPatterns = {
   // Simple pattern when someone else loses (round ended)
   ROUND_ENDED: [150, 100, 150],
 
-  // Celebratory pattern for max roll
-  MAX_ROLL: [50, 50, 50, 50, 100, 50, 200],
+  // Small celebratory buzz for max roll
+  MAX_ROLL: [50, 50, 100],
 } as const;
 
 /**
