@@ -53,8 +53,18 @@ export default function HostPage() {
   const [newTeamColor, setNewTeamColor] = useState("#3b82f6");
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
 
+  const [animationComplete, setAnimationComplete] = useState(true);
+
+  // Track when animation starts
+  useEffect(() => {
+    if (gameState.lastRoll !== null) {
+      setAnimationComplete(false);
+    }
+  }, [gameState.lastRoll]);
+
   // Handle animation completion - show loser notification after dice animation
   const handleAnimationComplete = useCallback(() => {
+    setAnimationComplete(true);
     if (gameState.lastLoserId) {
       setNotificationLoserId(gameState.lastLoserId);
       setShowLoserNotification(true);
@@ -487,7 +497,7 @@ export default function HostPage() {
                   }}
                   className="px-12"
                 >
-                  ROLL (1-{(canSetRange && customRange ? customRange : gameState.currentMaxRoll).toLocaleString()})
+                  ROLL (1-{(canSetRange && customRange ? customRange : (animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})
                 </Button>
                 <div className="text-xs text-[var(--muted)] mt-2">Press Space to roll</div>
               </>

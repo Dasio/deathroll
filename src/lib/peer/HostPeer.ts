@@ -94,22 +94,10 @@ export class HostPeer {
     conn.on("data", (data) => {
       logger.debug("[Host] Received data from:", conn.peer, data);
 
-      // Log the raw message for debugging
-      console.log("[Host] Raw message received:", JSON.stringify(data, null, 2));
-      console.log("[Host] Message type:", typeof data, "Is null?", data === null);
-      if (data && typeof data === 'object') {
-        console.log("[Host] Message keys:", Object.keys(data));
-        if ('overrideRange' in data) {
-          console.log("[Host] overrideRange value:", data.overrideRange, "type:", typeof data.overrideRange);
-        }
-      }
-
       // Validate incoming message
       const result = safeParsePlayerMessage(data);
       if (!result.success) {
         logger.error("[Host] Invalid message from player:", conn.peer, result.error);
-        console.error("[Host] Validation failed for:", JSON.stringify(data, null, 2));
-        console.error("[Host] Validation errors:", JSON.stringify(result.error.issues, null, 2));
         this.callbacks.onError(new Error(`Invalid message from player: ${JSON.stringify(result.error.issues)}`));
         return;
       }

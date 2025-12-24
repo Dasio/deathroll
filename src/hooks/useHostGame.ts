@@ -197,7 +197,6 @@ export function useHostGame() {
         }
 
         const newState = processRoll(currentState, player.id);
-        console.log("[Host] Remote roll result:", newState.lastRoll, "max was:", newState.lastMaxRoll);
 
         // Track roll in statistics
         if (newState.lastRoll !== null && newState.lastMaxRoll !== null) {
@@ -330,7 +329,6 @@ export function useHostGame() {
     }
 
     const newState = processRoll(currentState, playerId);
-    console.log("[Host] Local roll result:", newState.lastRoll, "max was:", newState.lastMaxRoll);
 
     // Track roll in statistics
     if (newState.lastRoll !== null && newState.lastMaxRoll !== null) {

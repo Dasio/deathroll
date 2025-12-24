@@ -29,10 +29,17 @@ export const RollDisplay = memo(function RollDisplay({
   const [showMaxRoll, setShowMaxRoll] = useState(false);
   const animationMaxRef = useRef(currentMax);
   const lastRollRef = useRef<number | null>(null);
+  const lastMaxRollRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (lastRoll !== null && lastRoll !== lastRollRef.current && !animating) {
+    // Trigger animation if either lastRoll OR lastMaxRoll changed (handles same roll value from different ranges)
+    if (
+      lastRoll !== null &&
+      (lastRoll !== lastRollRef.current || lastMaxRoll !== lastMaxRollRef.current) &&
+      !animating
+    ) {
       lastRollRef.current = lastRoll;
+      lastMaxRollRef.current = lastMaxRoll;
       // Store the max at the start of animation (use lastMaxRoll if available)
       animationMaxRef.current = lastMaxRoll ?? currentMax;
       setAnimating(true);
@@ -67,15 +74,7 @@ export const RollDisplay = memo(function RollDisplay({
           // Show MAX ROLL if rolled the maximum value
           // Use lastMaxRoll (the actual max before this roll) if available
           const rollMax = lastMaxRoll !== null && lastMaxRoll !== undefined ? lastMaxRoll : animationMaxRef.current;
-          console.log("[RollDisplay] Checking max roll:", {
-            lastRoll,
-            lastMaxRoll,
-            animationMax: animationMaxRef.current,
-            rollMax,
-            isMax: lastRoll === rollMax,
-          });
           if (lastRoll === rollMax && rollMax > 1) {
-            console.log("[RollDisplay] MAX ROLL detected!");
             setShowMaxRoll(true);
             vibrateMaxRoll();
             playMaxRollSound();
@@ -109,7 +108,7 @@ export const RollDisplay = memo(function RollDisplay({
       )}
       {showMaxRoll && (
         <div className="text-2xl text-[var(--success)] font-bold mt-4 animate-pulse">
-          🎯 MAX ROLL! Previous player drinks! 🍺
+          🎯 MAX ROLL!
         </div>
       )}
     </div>

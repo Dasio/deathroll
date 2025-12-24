@@ -396,7 +396,7 @@ function PlayContent() {
                   }}
                   className="px-12 py-4 text-xl"
                 >
-                  ROLL (1-{(canSetRange && customRange ? customRange : gameState.currentMaxRoll).toLocaleString()})
+                  ROLL (1-{(canSetRange && customRange ? customRange : (animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})
                 </Button>
                 <div className="text-xs text-[var(--muted)] mt-2">Press Space to roll</div>
               </>
