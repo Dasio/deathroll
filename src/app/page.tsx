@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
@@ -25,6 +26,16 @@ export default function Home() {
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-4">
       <div className="text-center mb-8">
+        <div className="flex justify-center mb-4">
+          <Image
+            src="/logo-200.png"
+            alt="DeathRoll Logo"
+            width={120}
+            height={120}
+            className="rounded-2xl"
+            priority
+          />
+        </div>
         <h1 className="text-5xl font-bold mb-2">DeathRoll</h1>
         <p className="text-[var(--muted)]">Roll until someone hits 1!</p>
       </div>
