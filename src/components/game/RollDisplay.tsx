@@ -29,7 +29,7 @@ export const RollDisplay = memo(function RollDisplay({
   const [showMaxRoll, setShowMaxRoll] = useState(false);
   const animationMaxRef = useRef(currentMax);
   const lastRollRef = useRef<number | null>(null);
-  const lastMaxRollRef = useRef<number | null>(null);
+  const lastMaxRollRef = useRef<number | null | undefined>(null);
 
   useEffect(() => {
     // Trigger animation if either lastRoll OR lastMaxRoll changed (handles same roll value from different ranges)
