@@ -6,12 +6,13 @@ import {
   playDeathSound,
   playMaxRollSound,
 } from "@/lib/sounds";
-import { vibrateDeathRoll, vibrateMaxRoll } from "@/lib/vibration";
+import { vibrateDeathRoll, vibrateRoundEnded, vibrateMaxRoll } from "@/lib/vibration";
 
 interface RollDisplayProps {
   currentMax: number;
   lastRoll: number | null;
   lastMaxRoll?: number | null;
+  isMyLoss?: boolean; // True if this player lost, false if someone else lost
   onAnimationComplete?: () => void;
 }
 
@@ -19,6 +20,7 @@ export const RollDisplay = memo(function RollDisplay({
   currentMax,
   lastRoll,
   lastMaxRoll,
+  isMyLoss = false,
   onAnimationComplete,
 }: RollDisplayProps) {
   const [displayValue, setDisplayValue] = useState<number | null>(lastRoll);
@@ -54,7 +56,12 @@ export const RollDisplay = memo(function RollDisplay({
           // Only show DEATH ROLL after animation completes and result is 1
           if (lastRoll === 1) {
             setShowDeathRoll(true);
-            vibrateDeathRoll();
+            // Different vibration depending on who lost
+            if (isMyLoss) {
+              vibrateDeathRoll(); // Strong vibration when YOU lose
+            } else {
+              vibrateRoundEnded(); // Gentler vibration when someone else loses
+            }
             playDeathSound();
           }
           // Show MAX ROLL if rolled the maximum value

@@ -10,8 +10,11 @@ export const VibrationPatterns = {
   // Short pulse when it's your turn
   YOUR_TURN: [100],
 
-  // Longer pattern for death roll (1)
+  // Longer pattern when YOU lose (death roll)
   DEATH_ROLL: [200, 100, 200, 100, 300],
+
+  // Simple pattern when someone else loses (round ended)
+  ROUND_ENDED: [150, 100, 150],
 
   // Celebratory pattern for max roll
   MAX_ROLL: [50, 50, 50, 50, 100, 50, 200],
@@ -96,6 +99,10 @@ export function vibrateYourTurn(): void {
 
 export function vibrateDeathRoll(): void {
   vibrate(VibrationPatterns.DEATH_ROLL);
+}
+
+export function vibrateRoundEnded(): void {
+  vibrate(VibrationPatterns.ROUND_ENDED);
 }
 
 export function vibrateMaxRoll(): void {

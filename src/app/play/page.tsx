@@ -75,16 +75,30 @@ function PlayContent() {
   const myPlayer = gameState.players.find((p) => p.id === playerId);
   const canSetRange = gameState.currentMaxRoll === gameState.initialMaxRoll;
   const iJustLostAfterAnimation = showLoserNotification && notificationLoserId === playerId;
+  const [animationComplete, setAnimationComplete] = useState(true);
 
-  // Vibrate and play sound when it becomes my turn
+  // Track when animation starts
+  useEffect(() => {
+    if (gameState.lastRoll !== null) {
+      setAnimationComplete(false);
+    }
+  }, [gameState.lastRoll]);
+
+  // Mark animation complete callback
+  const handleAnimationCompleteWithFlag = useCallback(() => {
+    setAnimationComplete(true);
+    handleAnimationComplete();
+  }, [handleAnimationComplete]);
+
+  // Vibrate and play sound when it becomes my turn (after animation completes)
   const myTurn = isMyTurn();
   useEffect(() => {
-    if (myTurn && !previousMyTurnRef.current && gameState.phase === "playing") {
+    if (myTurn && !previousMyTurnRef.current && gameState.phase === "playing" && animationComplete) {
       vibrateYourTurn();
       playTurnNotificationSound();
     }
     previousMyTurnRef.current = myTurn;
-  }, [myTurn, gameState.phase]);
+  }, [myTurn, gameState.phase, animationComplete]);
 
   // Keyboard shortcuts for rolling
   useEffect(() => {
@@ -340,7 +354,8 @@ function PlayContent() {
           currentMax={gameState.currentMaxRoll}
           lastRoll={gameState.lastRoll}
           lastMaxRoll={gameState.lastMaxRoll}
-          onAnimationComplete={handleAnimationComplete}
+          isMyLoss={gameState.lastLoserId === playerId}
+          onAnimationComplete={handleAnimationCompleteWithFlag}
         />
 
         <div className="text-center mt-4">
@@ -348,7 +363,7 @@ function PlayContent() {
             <div className="text-lg text-[var(--muted)]">
               👁️ Spectating - {currentPlayer?.name}&apos;s turn
             </div>
-          ) : myTurn ? (
+          ) : myTurn && animationComplete ? (
             <>
               <div className="text-lg text-[var(--success)] font-bold mb-4">
                 YOUR TURN!
