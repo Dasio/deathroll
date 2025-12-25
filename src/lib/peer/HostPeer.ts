@@ -41,7 +41,7 @@ export class HostPeer {
   private roomCode: string;
   private lastHeartbeatTimes: Map<string, number> = new Map();
   private heartbeatCheckInterval: ReturnType<typeof setInterval> | null = null;
-  private readonly HEARTBEAT_TIMEOUT_MS = 20000; // 20 seconds without heartbeat = disconnected
+  private readonly HEARTBEAT_TIMEOUT_MS = 60000; // 60 seconds without heartbeat = disconnected
 
   constructor(roomCode: string, callbacks: HostPeerCallbacks) {
     this.roomCode = roomCode;

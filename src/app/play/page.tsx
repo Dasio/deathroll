@@ -1,11 +1,16 @@
 "use client";
 
-import { useEffect, useState, Suspense, useCallback, useRef } from "react";
+import { useEffect, useState, Suspense, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { usePlayerGame } from "@/hooks/usePlayerGame";
 import { useWakeLock } from "@/hooks/useWakeLock";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useCoinAbilityState } from "@/hooks/game/useCoinAbilityState";
+import { useRangeSelection } from "@/hooks/game/useRangeSelection";
+import { useAnimationState } from "@/hooks/game/useAnimationState";
+import { useLoserNotification } from "@/hooks/game/useLoserNotification";
+import { useKeyboardRoll } from "@/hooks/game/useKeyboardRoll";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
@@ -53,33 +58,20 @@ function PlayContent() {
   const [playerName, setPlayerName] = useState(savedSession?.playerName || "");
   const [hasJoined, setHasJoined] = useState(false);
   const [joinAsSpectator, setJoinAsSpectator] = useState(false);
-  const [customRange, setCustomRange] = useState<number | null>(null);
-  const [sessionMaxRoll, setSessionMaxRoll] = useState<number | null>(null);
-  const [showLoserNotification, setShowLoserNotification] = useState(false);
-  const [notificationLoserId, setNotificationLoserId] = useState<string | null>(null);
   const previousMyTurnRef = useRef(false);
-  const [isRolling, setIsRolling] = useState(false);
 
-  // Coin ability states
-  const [showPlayerSelector, setShowPlayerSelector] = useState(false);
-  const [localRollTwice, setLocalRollTwice] = useState(false);
-  const [localNextPlayerOverride, setLocalNextPlayerOverride] = useState<string | null>(null);
+  // Use shared hooks
+  const coinAbilityState = useCoinAbilityState();
+  const rangeState = useRangeSelection();
 
-  // Handle animation completion - show loser notification after dice animation
-  const handleAnimationComplete = useCallback(() => {
-    if (gameState.lastLoserId) {
-      setNotificationLoserId(gameState.lastLoserId);
-      setShowLoserNotification(true);
+  // Animation and loser notification
+  const loserNotificationState = useLoserNotification(gameState);
+  const animationState = useAnimationState(gameState, (state) => {
+    if (state.lastLoserId) {
+      loserNotificationState.setNotificationLoserId(state.lastLoserId);
+      loserNotificationState.setShowLoserNotification(true);
     }
-  }, [gameState.lastLoserId]);
-
-  // Reset notification when a new roll starts (lastLoserId becomes null)
-  useEffect(() => {
-    if (!gameState.lastLoserId) {
-      setShowLoserNotification(false);
-      setNotificationLoserId(null);
-    }
-  }, [gameState.lastLoserId]);
+  });
 
   useEffect(() => {
     return () => {
@@ -98,87 +90,39 @@ function PlayContent() {
 
   // Compute derived state
   const currentPlayer = getCurrentPlayer(gameState);
-  const lastLoser = gameState.players.find((p) => p.id === notificationLoserId);
   const myPlayer = gameState.players.find((p) => p.id === playerId);
   const canSetRange = gameState.currentMaxRoll === gameState.initialMaxRoll;
-  const iJustLostAfterAnimation = showLoserNotification && notificationLoserId === playerId;
-  const [animationComplete, setAnimationComplete] = useState(true);
-
-  // Track when animation starts (use isRolling flag)
-  useEffect(() => {
-    if (gameState.isRolling) {
-      setAnimationComplete(false);
-    }
-  }, [gameState.isRolling]);
-
-  // Set animation complete when roll-twice picker is shown
-  useEffect(() => {
-    if (!gameState.isRolling && gameState.rollTwiceResults) {
-      setAnimationComplete(true);
-    }
-  }, [gameState.isRolling, gameState.rollTwiceResults]);
-
-  // Use ref for latest gameState to avoid callback identity changes during animation
-  const gameStateRef = useRef(gameState);
-  useEffect(() => {
-    gameStateRef.current = gameState;
-  }, [gameState]);
-
-  // Stable animation complete handler
-  const handleAnimationCompleteStable = useCallback(() => {
-    setAnimationComplete(true);
-    const currentState = gameStateRef.current;
-    if (currentState.lastLoserId) {
-      setNotificationLoserId(currentState.lastLoserId);
-      setShowLoserNotification(true);
-    }
-  }, []);
-
-  // Mark animation complete callback (kept for compatibility)
-  const handleAnimationCompleteWithFlag = useCallback(() => {
-    handleAnimationCompleteStable();
-  }, [handleAnimationCompleteStable]);
+  const iJustLostAfterAnimation = loserNotificationState.showLoserNotification && loserNotificationState.notificationLoserId === playerId;
 
   // Vibrate and play sound when it becomes my turn (after animation completes)
   const myTurn = isMyTurn();
   useEffect(() => {
-    if (myTurn && !previousMyTurnRef.current && gameState.phase === "playing" && animationComplete) {
+    if (myTurn && !previousMyTurnRef.current && gameState.phase === "playing" && animationState.animationComplete) {
       vibrateYourTurn();
       playTurnNotificationSound();
     }
     previousMyTurnRef.current = myTurn;
-  }, [myTurn, gameState.phase, animationComplete]);
+  }, [myTurn, gameState.phase, animationState.animationComplete]);
 
   // Keyboard shortcuts for rolling
-  useEffect(() => {
-    if (gameState.phase !== "playing" || isSpectator) return;
-
-    const handleKeyPress = (e: KeyboardEvent) => {
-      // Only handle space or enter when it's my turn and animation is complete
-      if ((e.key === " " || e.key === "Enter") && myTurn && !isRolling && animationComplete) {
-        e.preventDefault();
-        setIsRolling(true);
-        initializeSounds();
-        const rangeToUse = canSetRange && customRange && customRange !== gameState.currentMaxRoll
-          ? customRange
-          : undefined;
-        // Save the chosen range for the session
-        if (rangeToUse) {
-          setSessionMaxRoll(rangeToUse);
-        }
-        requestRoll(rangeToUse, localRollTwice, localNextPlayerOverride);
-        setCustomRange(null);
-        // Clear local coin ability state after rolling
-        setLocalRollTwice(false);
-        setLocalNextPlayerOverride(null);
-        setShowPlayerSelector(false);
-        setTimeout(() => setIsRolling(false), 500);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyPress);
-    return () => window.removeEventListener("keydown", handleKeyPress);
-  }, [gameState.phase, myTurn, isRolling, animationComplete, canSetRange, customRange, gameState.currentMaxRoll, requestRoll, isSpectator, localRollTwice, localNextPlayerOverride]);
+  useKeyboardRoll({
+    gameState,
+    isMyTurn: myTurn && !isSpectator,
+    animationComplete: animationState.animationComplete,
+    canSetRange,
+    customRange: rangeState.customRange,
+    sessionMaxRoll: rangeState.sessionMaxRoll,
+    onRoll: (rangeOverride) => {
+      requestRoll(rangeOverride, coinAbilityState.localRollTwice, coinAbilityState.localNextPlayerOverride);
+    },
+    coinAbilityState: {
+      localRollTwice: coinAbilityState.localRollTwice,
+      localNextPlayerOverride: coinAbilityState.localNextPlayerOverride,
+    },
+    onCoinStateReset: coinAbilityState.resetCoinState,
+    onSetSessionMaxRoll: rangeState.setSessionMaxRoll,
+    onClearCustomRange: () => rangeState.setCustomRange(null),
+  });
 
   const handleJoin = async () => {
     if (roomCode.trim() && playerName.trim()) {
@@ -440,7 +384,7 @@ function PlayContent() {
       </div>
 
       {/* Show who just lost - only after animation completes */}
-      {showLoserNotification && lastLoser && (
+      {loserNotificationState.showLoserNotification && loserNotificationState.lastLoser && (
         <Card className={`mb-4 ${iJustLostAfterAnimation ? "bg-[var(--danger)]/20" : "bg-[var(--danger)]/10"} border-[var(--danger)]`}>
           <div className="text-center">
             {iJustLostAfterAnimation ? (
@@ -449,7 +393,7 @@ function PlayContent() {
               </span>
             ) : (
               <span className="text-[var(--danger)] font-bold">
-                💀 {lastLoser.name} rolled a 1!
+                💀 {loserNotificationState.lastLoser.name} rolled a 1!
               </span>
             )}
           </div>
@@ -465,7 +409,7 @@ function PlayContent() {
             isRolling={gameState.isRolling}
             isMyLoss={gameState.lastLoserId === playerId}
             final10Mode={gameState.final10Mode}
-            onAnimationComplete={handleAnimationCompleteWithFlag}
+            onAnimationComplete={animationState.handleAnimationComplete}
           />
         ) : (
           <div className="text-center py-8">
@@ -479,7 +423,7 @@ function PlayContent() {
             <div className="text-lg text-[var(--muted)]">
               👁️ Spectating - {currentPlayer?.name}&apos;s turn
             </div>
-          ) : myTurn && animationComplete ? (
+          ) : myTurn && animationState.animationComplete ? (
             <>
               <div className="text-lg text-[var(--success)] font-bold mb-4">
                 YOUR TURN!
@@ -492,8 +436,8 @@ function PlayContent() {
                   <Input
                     type="number"
                     min={2}
-                    value={customRange ?? sessionMaxRoll ?? gameState.currentMaxRoll}
-                    onChange={(e) => setCustomRange(Number(e.target.value))}
+                    value={rangeState.customRange ?? rangeState.sessionMaxRoll ?? gameState.currentMaxRoll}
+                    onChange={(e) => rangeState.setCustomRange(Number(e.target.value))}
                     className="w-40 text-center"
                   />
                 </div>
@@ -508,7 +452,7 @@ function PlayContent() {
                       const myPlayer = gameState.players.find((p) => p.id === playerId);
                       const activePlayers = gameState.players.filter((p) => !p.isSpectator && p.isConnected);
                       const canAfford = myPlayer && myPlayer.coins >= 1;
-                      const isActive = localNextPlayerOverride !== null;
+                      const isActive = coinAbilityState.localNextPlayerOverride !== null;
                       const hasChoice = activePlayers.length > 2; // Need 3+ players for this to be useful
 
                       if (!hasChoice) return null; // Hide with 2 or fewer players
@@ -520,11 +464,11 @@ function PlayContent() {
                           onClick={() => {
                             if (isActive) {
                               // Cancel
-                              setLocalNextPlayerOverride(null);
-                              setShowPlayerSelector(false);
+                              coinAbilityState.setLocalNextPlayerOverride(null);
+                              coinAbilityState.setShowPlayerSelector(false);
                             } else {
                               // Show selector
-                              setShowPlayerSelector(!showPlayerSelector);
+                              coinAbilityState.setShowPlayerSelector(!coinAbilityState.showPlayerSelector);
                             }
                           }}
                           disabled={!isActive && !canAfford}
@@ -542,20 +486,20 @@ function PlayContent() {
 
                       return (
                         <Button
-                          variant={localRollTwice ? "primary" : "secondary"}
+                          variant={coinAbilityState.localRollTwice ? "primary" : "secondary"}
                           size="sm"
-                          onClick={() => setLocalRollTwice(!localRollTwice)}
-                          disabled={!localRollTwice && !canAfford}
+                          onClick={() => coinAbilityState.setLocalRollTwice(!coinAbilityState.localRollTwice)}
+                          disabled={!coinAbilityState.localRollTwice && !canAfford}
                           className="text-sm"
                         >
-                          {localRollTwice ? "✓ Roll Twice (click to cancel)" : `🎲 Roll Twice (1 🪙)`}
+                          {coinAbilityState.localRollTwice ? "✓ Roll Twice (click to cancel)" : `🎲 Roll Twice (1 🪙)`}
                         </Button>
                       );
                     })()}
                   </div>
 
                   {/* Player Selector for Choose Next Player */}
-                  {showPlayerSelector && (
+                  {coinAbilityState.showPlayerSelector && (
                     <div className="p-3 bg-[var(--background)] rounded border border-[var(--border)]">
                       <div className="text-sm font-semibold mb-2">Choose who goes next:</div>
                       <div className="grid grid-cols-2 gap-2">
@@ -567,8 +511,8 @@ function PlayContent() {
                               size="sm"
                               variant="secondary"
                               onClick={() => {
-                                setLocalNextPlayerOverride(player.id);
-                                setShowPlayerSelector(false);
+                                coinAbilityState.setLocalNextPlayerOverride(player.id);
+                                coinAbilityState.setShowPlayerSelector(false);
                               }}
                               className="text-xs"
                             >
@@ -608,28 +552,26 @@ function PlayContent() {
                     size="lg"
                     onClick={() => {
                       initializeSounds(); // Ensure sounds are initialized on interaction
-                      const rangeToUse = canSetRange && customRange && customRange !== gameState.currentMaxRoll
-                        ? customRange
+                      const rangeToUse = canSetRange && rangeState.customRange && rangeState.customRange !== gameState.currentMaxRoll
+                        ? rangeState.customRange
                         : undefined;
                       // Save the chosen range for the session
                       if (rangeToUse) {
-                        setSessionMaxRoll(rangeToUse);
+                        rangeState.setSessionMaxRoll(rangeToUse);
                       }
-                      requestRoll(rangeToUse, localRollTwice, localNextPlayerOverride);
-                      setCustomRange(null);
+                      requestRoll(rangeToUse, coinAbilityState.localRollTwice, coinAbilityState.localNextPlayerOverride);
+                      rangeState.setCustomRange(null);
                       // Clear local coin ability state after rolling
-                      setLocalRollTwice(false);
-                      setLocalNextPlayerOverride(null);
-                      setShowPlayerSelector(false);
+                      coinAbilityState.resetCoinState();
                     }}
-                    disabled={!animationComplete}
+                    disabled={!animationState.animationComplete}
                     className="px-12 py-4 text-xl"
                   >
-                    ROLL (1-{(canSetRange && customRange ? customRange : (animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})
+                    ROLL (1-{(canSetRange && rangeState.customRange ? rangeState.customRange : (animationState.animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})
                   </Button>
                   {!isMobile && (
                     <div className="text-xs text-[var(--muted)] mt-2">
-                      {animationComplete ? 'Press Space to roll' : 'Dice rolling...'}
+                      {animationState.animationComplete ? 'Press Space to roll' : 'Dice rolling...'}
                     </div>
                   )}
                 </>
@@ -651,7 +593,7 @@ function PlayContent() {
             players={gameState.players}
             currentPlayerId={currentPlayer?.id}
             myPlayerId={playerId ?? undefined}
-            lastLoserTeamId={showLoserNotification ? gameState.lastLoserTeamId ?? undefined : undefined}
+            lastLoserTeamId={loserNotificationState.showLoserNotification ? gameState.lastLoserTeamId ?? undefined : undefined}
             showScores
           />
         ) : (
@@ -659,7 +601,7 @@ function PlayContent() {
             players={gameState.players}
             currentPlayerId={currentPlayer?.id}
             myPlayerId={playerId ?? undefined}
-            lastLoserId={showLoserNotification ? notificationLoserId ?? undefined : undefined}
+            lastLoserId={loserNotificationState.showLoserNotification ? loserNotificationState.notificationLoserId ?? undefined : undefined}
             showScores
             showCoins={gameState.coinsEnabled}
           />

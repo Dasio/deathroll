@@ -35,6 +35,8 @@ const joinRequestSchema = z.object({
 const rollRequestSchema = z.object({
   type: z.literal("ROLL_REQUEST"),
   overrideRange: z.number().int().positive().max(1000000).nullish(),
+  rollTwice: z.boolean().optional(),
+  nextPlayerOverride: z.string().nullish(),
 });
 
 const setRangeSchema = z.object({
@@ -50,12 +52,18 @@ const stateSyncRequestSchema = z.object({
   type: z.literal("STATE_SYNC_REQUEST"),
 });
 
+const chooseRollSchema = z.object({
+  type: z.literal("CHOOSE_ROLL"),
+  chosenRoll: z.number().int().positive().max(1000000),
+});
+
 export const playerMessageSchema = z.discriminatedUnion("type", [
   joinRequestSchema,
   rollRequestSchema,
   setRangeSchema,
   heartbeatSchema,
   stateSyncRequestSchema,
+  chooseRollSchema,
 ]);
 
 /**

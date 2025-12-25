@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useHostGame } from "@/hooks/useHostGame";
 import { useWakeLock } from "@/hooks/useWakeLock";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useCoinAbilityState } from "@/hooks/game/useCoinAbilityState";
+import { useRangeSelection } from "@/hooks/game/useRangeSelection";
+import { useAnimationState } from "@/hooks/game/useAnimationState";
+import { useLoserNotification } from "@/hooks/game/useLoserNotification";
+import { useKeyboardRoll } from "@/hooks/game/useKeyboardRoll";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
@@ -52,98 +57,55 @@ export default function HostPage() {
 
   const [newPlayerName, setNewPlayerName] = useState("");
   const [initialRange, setInitialRange] = useState(100);
-  const [customRange, setCustomRange] = useState<number | null>(null);
-  const [sessionMaxRoll, setSessionMaxRoll] = useState<number | null>(null);
-  const [showLoserNotification, setShowLoserNotification] = useState(false);
-  const [notificationLoserId, setNotificationLoserId] = useState<string | null>(null);
-  const [isRolling, setIsRolling] = useState(false);
 
   // Team mode state
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamColor, setNewTeamColor] = useState("#3b82f6");
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
 
-  // Coin system UI state
-  const [showPlayerSelector, setShowPlayerSelector] = useState(false);
-  const [localRollTwice, setLocalRollTwice] = useState(false);
-  const [localNextPlayerOverride, setLocalNextPlayerOverride] = useState<string | null>(null);
+  // Use shared hooks
+  const coinAbilityState = useCoinAbilityState();
+  const rangeState = useRangeSelection();
 
-  const [animationComplete, setAnimationComplete] = useState(true);
-
-  // Track when animation starts (use isRolling flag)
-  useEffect(() => {
-    if (gameState.isRolling) {
-      setAnimationComplete(false);
+  // Animation and loser notification
+  const loserNotificationState = useLoserNotification(gameState);
+  const animationState = useAnimationState(gameState, (state) => {
+    if (state.lastLoserId) {
+      loserNotificationState.setNotificationLoserId(state.lastLoserId);
+      loserNotificationState.setShowLoserNotification(true);
     }
-  }, [gameState.isRolling]);
-
-  // Set animation complete when roll-twice picker is shown
-  useEffect(() => {
-    if (!gameState.isRolling && gameState.rollTwiceResults) {
-      setAnimationComplete(true);
-    }
-  }, [gameState.isRolling, gameState.rollTwiceResults]);
-
-  // Use ref for latest gameState to avoid callback identity changes during animation
-  const gameStateRef = useRef(gameState);
-  useEffect(() => {
-    gameStateRef.current = gameState;
-  }, [gameState]);
-
-  // Handle animation completion - show loser notification after dice animation
-  // IMPORTANT: No dependencies to keep callback stable during animation!
-  const handleAnimationComplete = useCallback(() => {
-    setAnimationComplete(true);
-    const currentState = gameStateRef.current;
-    if (currentState.lastLoserId) {
-      setNotificationLoserId(currentState.lastLoserId);
-      setShowLoserNotification(true);
-    }
-  }, []); // Empty deps = stable callback
-
-  // Reset notification when a new roll starts (lastLoserId becomes null)
-  useEffect(() => {
-    if (!gameState.lastLoserId) {
-      setShowLoserNotification(false);
-      setNotificationLoserId(null);
-    }
-  }, [gameState.lastLoserId]);
+  });
 
   // Compute derived state
   const currentPlayer = getCurrentPlayer(gameState);
-  const lastLoser = gameState.players.find((p) => p.id === notificationLoserId);
   const canSetRange = gameState.currentMaxRoll === gameState.initialMaxRoll;
 
   // Keyboard shortcuts for rolling
-  useEffect(() => {
-    if (gameState.phase !== "playing") return;
-
-    const handleKeyPress = (e: KeyboardEvent) => {
-      // Only handle space or enter when it's a local player's turn and animation is complete
-      if ((e.key === " " || e.key === "Enter") && currentPlayer?.isLocal && !isRolling && animationComplete) {
-        e.preventDefault();
-        setIsRolling(true);
-        initializeSounds();
-        const rangeToUse = canSetRange && customRange && customRange !== gameState.currentMaxRoll
-          ? customRange
-          : undefined;
-        // Save the chosen range for the session
-        if (rangeToUse) {
-          setSessionMaxRoll(rangeToUse);
-        }
-        localRoll(currentPlayer.id, rangeToUse, localRollTwice, localNextPlayerOverride);
-        setCustomRange(null);
-        // Clear local coin ability state after rolling
-        setLocalRollTwice(false);
-        setLocalNextPlayerOverride(null);
-        setShowPlayerSelector(false);
-        setTimeout(() => setIsRolling(false), 500);
+  useKeyboardRoll({
+    gameState,
+    isMyTurn: currentPlayer?.isLocal ?? false,
+    animationComplete: animationState.animationComplete,
+    canSetRange,
+    customRange: rangeState.customRange,
+    sessionMaxRoll: rangeState.sessionMaxRoll,
+    onRoll: (rangeOverride) => {
+      if (currentPlayer) {
+        localRoll(
+          currentPlayer.id,
+          rangeOverride,
+          coinAbilityState.localRollTwice,
+          coinAbilityState.localNextPlayerOverride
+        );
       }
-    };
-
-    window.addEventListener("keydown", handleKeyPress);
-    return () => window.removeEventListener("keydown", handleKeyPress);
-  }, [gameState.phase, currentPlayer, isRolling, animationComplete, canSetRange, customRange, gameState.currentMaxRoll, localRoll, localRollTwice, localNextPlayerOverride]);
+    },
+    coinAbilityState: {
+      localRollTwice: coinAbilityState.localRollTwice,
+      localNextPlayerOverride: coinAbilityState.localNextPlayerOverride,
+    },
+    onCoinStateReset: coinAbilityState.resetCoinState,
+    onSetSessionMaxRoll: rangeState.setSessionMaxRoll,
+    onClearCustomRange: () => rangeState.setCustomRange(null),
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -508,7 +470,7 @@ export default function HostPage() {
           className="w-full"
           onClick={() => {
             initializeSounds();
-            setSessionMaxRoll(initialRange);
+            rangeState.setSessionMaxRoll(initialRange);
             startGame(initialRange);
           }}
           disabled={gameState.players.length < 1}
@@ -537,11 +499,11 @@ export default function HostPage() {
       </div>
 
       {/* Show who just lost - only after animation completes */}
-      {showLoserNotification && lastLoser && (
+      {loserNotificationState.showLoserNotification && loserNotificationState.lastLoser && (
         <Card className="mb-4 bg-[var(--danger)]/10 border-[var(--danger)]">
           <div className="text-center">
             <span className="text-[var(--danger)] font-bold">
-              💀 {lastLoser.name} rolled a 1! (Total losses: {lastLoser.losses})
+              💀 {loserNotificationState.lastLoser.name} rolled a 1! (Total losses: {loserNotificationState.lastLoser.losses})
             </span>
           </div>
         </Card>
@@ -555,7 +517,7 @@ export default function HostPage() {
             lastMaxRoll={gameState.lastMaxRoll}
             isRolling={gameState.isRolling}
             final10Mode={gameState.final10Mode}
-            onAnimationComplete={handleAnimationComplete}
+            onAnimationComplete={animationState.handleAnimationComplete}
           />
         ) : (
           <div className="text-center py-8">
@@ -577,8 +539,8 @@ export default function HostPage() {
                 <Input
                   type="number"
                   min={2}
-                  value={customRange ?? sessionMaxRoll ?? gameState.currentMaxRoll}
-                  onChange={(e) => setCustomRange(Number(e.target.value))}
+                  value={rangeState.customRange ?? rangeState.sessionMaxRoll ?? gameState.currentMaxRoll}
+                  onChange={(e) => rangeState.setCustomRange(Number(e.target.value))}
                   className="w-40 text-center"
                 />
               </div>
@@ -616,7 +578,7 @@ export default function HostPage() {
 
                     const myPlayer = gameState.players.find((p) => p.id === currentPlayer.id);
                     const canAfford = myPlayer && myPlayer.coins >= 1;
-                    const isActive = localNextPlayerOverride !== null;
+                    const isActive = coinAbilityState.localNextPlayerOverride !== null;
 
                     return (
                       <Button
@@ -625,11 +587,11 @@ export default function HostPage() {
                         onClick={() => {
                           if (isActive) {
                             // Cancel
-                            setLocalNextPlayerOverride(null);
-                            setShowPlayerSelector(false);
+                            coinAbilityState.setLocalNextPlayerOverride(null);
+                            coinAbilityState.setShowPlayerSelector(false);
                           } else {
                             // Show selector
-                            setShowPlayerSelector(!showPlayerSelector);
+                            coinAbilityState.setShowPlayerSelector(!coinAbilityState.showPlayerSelector);
                           }
                         }}
                         disabled={!isActive && !canAfford}
@@ -646,19 +608,19 @@ export default function HostPage() {
 
                     return (
                       <Button
-                        variant={localRollTwice ? "primary" : "secondary"}
+                        variant={coinAbilityState.localRollTwice ? "primary" : "secondary"}
                         size="sm"
-                        onClick={() => setLocalRollTwice(!localRollTwice)}
-                        disabled={!localRollTwice && !canAfford}
+                        onClick={() => coinAbilityState.setLocalRollTwice(!coinAbilityState.localRollTwice)}
+                        disabled={!coinAbilityState.localRollTwice && !canAfford}
                       >
-                        {localRollTwice ? "✓ Roll Twice (click to cancel)" : `🎲 Roll Twice (1 🪙)`}
+                        {coinAbilityState.localRollTwice ? "✓ Roll Twice (click to cancel)" : `🎲 Roll Twice (1 🪙)`}
                       </Button>
                     );
                   })()}
                 </div>
 
                 {/* Player Selector */}
-                {showPlayerSelector && (
+                {coinAbilityState.showPlayerSelector && (
                   <div className="p-3 bg-[var(--background)] rounded border">
                     <div className="text-sm font-semibold mb-2">Choose who goes next:</div>
                     <div className="grid grid-cols-2 gap-2">
@@ -670,8 +632,8 @@ export default function HostPage() {
                             size="sm"
                             variant="secondary"
                             onClick={() => {
-                              setLocalNextPlayerOverride(player.id);
-                              setShowPlayerSelector(false);
+                              coinAbilityState.setLocalNextPlayerOverride(player.id);
+                              coinAbilityState.setShowPlayerSelector(false);
                             }}
                           >
                             {player.emoji} {player.name}
@@ -689,28 +651,26 @@ export default function HostPage() {
                   size="lg"
                   onClick={() => {
                     initializeSounds();
-                    const rangeToUse = canSetRange && customRange && customRange !== gameState.currentMaxRoll
-                      ? customRange
+                    const rangeToUse = canSetRange && rangeState.customRange && rangeState.customRange !== gameState.currentMaxRoll
+                      ? rangeState.customRange
                       : undefined;
                     // Save the chosen range for the session
                     if (rangeToUse) {
-                      setSessionMaxRoll(rangeToUse);
+                      rangeState.setSessionMaxRoll(rangeToUse);
                     }
-                    localRoll(currentPlayer.id, rangeToUse, localRollTwice, localNextPlayerOverride);
-                    setCustomRange(null);
+                    localRoll(currentPlayer.id, rangeToUse, coinAbilityState.localRollTwice, coinAbilityState.localNextPlayerOverride);
+                    rangeState.setCustomRange(null);
                     // Clear local coin ability state after rolling
-                    setLocalRollTwice(false);
-                    setLocalNextPlayerOverride(null);
-                    setShowPlayerSelector(false);
+                    coinAbilityState.resetCoinState();
                   }}
-                  disabled={!animationComplete}
+                  disabled={!animationState.animationComplete}
                   className="px-12"
                 >
-                  ROLL (1-{(canSetRange && customRange ? customRange : (animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})
+                  ROLL (1-{(canSetRange && rangeState.customRange ? rangeState.customRange : (animationState.animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})
                 </Button>
                 {!isMobile && (
                   <div className="text-xs text-[var(--muted)] mt-2">
-                    {animationComplete ? 'Press Space to roll' : 'Dice rolling...'}
+                    {animationState.animationComplete ? 'Press Space to roll' : 'Dice rolling...'}
                   </div>
                 )}
               </>
@@ -730,14 +690,14 @@ export default function HostPage() {
             teams={gameState.teams}
             players={gameState.players}
             currentPlayerId={currentPlayer?.id}
-            lastLoserTeamId={showLoserNotification ? gameState.lastLoserTeamId ?? undefined : undefined}
+            lastLoserTeamId={loserNotificationState.showLoserNotification ? gameState.lastLoserTeamId ?? undefined : undefined}
             showScores
           />
         ) : (
           <PlayerList
             players={gameState.players}
             currentPlayerId={currentPlayer?.id}
-            lastLoserId={showLoserNotification ? notificationLoserId ?? undefined : undefined}
+            lastLoserId={loserNotificationState.showLoserNotification ? loserNotificationState.notificationLoserId ?? undefined : undefined}
             showScores
             showCoins={gameState.coinsEnabled}
             onKick={(id) => kickPlayer(id)}

@@ -237,7 +237,6 @@ export function useHostGame() {
           const newState = activateRollTwice(currentState, player.id);
           if (newState) {
             currentState = newState;
-            console.log("[Host] Player activated roll-twice with roll:", player.name);
           }
         }
 

@@ -287,7 +287,7 @@ export class PlayerPeer {
     this.heartbeatInterval = setInterval(() => {
       this.lastHeartbeatTime = Date.now();
       this.sendToHost({ type: "HEARTBEAT" });
-    }, 5000);
+    }, 30000); // Send heartbeat every 30 seconds
   }
 
   private stopHeartbeat() {
