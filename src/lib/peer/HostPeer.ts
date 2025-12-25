@@ -25,6 +25,7 @@ export interface HostPeerCallbacks {
   onPlayerReconnect: (
     peerId: string,
     name: string,
+    playerId: string | null | undefined,
     accept: (playerId: string) => void,
     reject: (reason: string) => void
   ) => void;
@@ -123,31 +124,48 @@ export class HostPeer {
 
     switch (message.type) {
       case "JOIN_REQUEST":
-        // Check if this might be a reconnection attempt
-        this.callbacks.onPlayerReconnect(
-          peerId,
-          message.name,
-          (existingPlayerId) => {
-            // This is a reconnection - accept with existing player ID
-            this.connections.set(peerId, conn);
-            // Callback will be handled by useHostGame
-          },
-          () => {
-            // Not a reconnection - treat as new join
-            this.callbacks.onPlayerJoinRequest(
-              peerId,
-              message.name,
-              message.spectator ?? false,
-              () => {
-                this.connections.set(peerId, conn);
-              },
-              (reason) => {
-                this.sendTo(conn, { type: "JOIN_REJECTED", reason });
-                conn.close();
-              }
-            );
-          }
-        );
+        // Check if this might be a reconnection attempt (if playerId is provided)
+        if (message.playerId) {
+          this.callbacks.onPlayerReconnect(
+            peerId,
+            message.name,
+            message.playerId,
+            (existingPlayerId) => {
+              // This is a reconnection - accept with existing player ID
+              this.connections.set(peerId, conn);
+              // Callback will be handled by useHostGame
+            },
+            () => {
+              // Not a reconnection - treat as new join
+              this.callbacks.onPlayerJoinRequest(
+                peerId,
+                message.name,
+                message.spectator ?? false,
+                () => {
+                  this.connections.set(peerId, conn);
+                },
+                (reason) => {
+                  this.sendTo(conn, { type: "JOIN_REJECTED", reason });
+                  conn.close();
+                }
+              );
+            }
+          );
+        } else {
+          // No playerId provided - new join
+          this.callbacks.onPlayerJoinRequest(
+            peerId,
+            message.name,
+            message.spectator ?? false,
+            () => {
+              this.connections.set(peerId, conn);
+            },
+            (reason) => {
+              this.sendTo(conn, { type: "JOIN_REJECTED", reason });
+              conn.close();
+            }
+          );
+        }
         break;
 
       case "HEARTBEAT":

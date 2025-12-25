@@ -25,6 +25,7 @@ import {
   assignPlayerToTeam,
   setTeamMode,
   setFinal10Mode,
+  skipDisconnectedPlayer,
 } from "@/lib/game/gameLogic";
 import { PlayerMessage } from "@/types/messages";
 import {
@@ -35,6 +36,7 @@ import {
 } from "@/lib/storage";
 import { assignAvatar } from "@/lib/avatars";
 import { playerNameSchema } from "@/lib/validation";
+import { logger } from "@/lib/logger";
 import { trackRoll, trackGameEnd, calculateDeficitOvercome } from "@/lib/statistics";
 
 export function useHostGame() {
@@ -93,23 +95,31 @@ export function useHostGame() {
 
     const host = new HostPeer(code, {
       onStatusChange: setStatus,
-      onPlayerReconnect: (peerId, name, accept, reject) => {
+      onPlayerReconnect: (peerId, name, playerId, accept, reject) => {
         const currentState = gameStateRef.current;
 
-        // Look for a disconnected player with this name
-        const disconnectedPlayer = findDisconnectedPlayerByName(currentState, name);
+        // Look for disconnected player by ID first, then by name
+        let disconnectedPlayer = playerId
+          ? currentState.players.find((p) => p.id === playerId && !p.isConnected && !p.isLocal)
+          : null;
+
+        if (!disconnectedPlayer) {
+          disconnectedPlayer = findDisconnectedPlayerByName(currentState, name);
+        }
 
         if (disconnectedPlayer) {
+          logger.debug("[Host] Reconnecting player:", disconnectedPlayer.name, disconnectedPlayer.id);
           // This is a reconnection
           accept(disconnectedPlayer.id);
 
           setGameState((prev) => {
-            const newState = reconnectPlayer(prev, disconnectedPlayer.id, peerId);
-            host.reconnectPlayer(peerId, disconnectedPlayer.id, newState);
+            const newState = reconnectPlayer(prev, disconnectedPlayer!.id, peerId);
+            host.reconnectPlayer(peerId, disconnectedPlayer!.id, newState);
             host.broadcastState(newState);
             return newState;
           });
         } else {
+          logger.debug("[Host] No disconnected player found for reconnection:", name, playerId);
           // Not a reconnection, proceed as new join
           reject("Not a reconnection");
         }
@@ -160,7 +170,12 @@ export function useHostGame() {
           const player = prev.players.find((p) => p.connectionId === peerId);
           if (!player) return prev;
 
-          const newState = setPlayerConnected(prev, player.id, false);
+          // Mark player as disconnected
+          let newState = setPlayerConnected(prev, player.id, false);
+
+          // Skip to next player if the disconnected player was current
+          newState = skipDisconnectedPlayer(newState);
+
           host.broadcastState(newState);
           return newState;
         });
@@ -510,23 +525,31 @@ export function useHostGame() {
 
     const host = new HostPeer(savedState.roomCode, {
       onStatusChange: setStatus,
-      onPlayerReconnect: (peerId, name, accept, reject) => {
+      onPlayerReconnect: (peerId, name, playerId, accept, reject) => {
         const currentState = gameStateRef.current;
 
-        // Look for a disconnected player with this name
-        const disconnectedPlayer = findDisconnectedPlayerByName(currentState, name);
+        // Look for disconnected player by ID first, then by name
+        let disconnectedPlayer = playerId
+          ? currentState.players.find((p) => p.id === playerId && !p.isConnected && !p.isLocal)
+          : null;
+
+        if (!disconnectedPlayer) {
+          disconnectedPlayer = findDisconnectedPlayerByName(currentState, name);
+        }
 
         if (disconnectedPlayer) {
+          logger.debug("[Host] Reconnecting player:", disconnectedPlayer.name, disconnectedPlayer.id);
           // This is a reconnection
           accept(disconnectedPlayer.id);
 
           setGameState((prev) => {
-            const newState = reconnectPlayer(prev, disconnectedPlayer.id, peerId);
-            host.reconnectPlayer(peerId, disconnectedPlayer.id, newState);
+            const newState = reconnectPlayer(prev, disconnectedPlayer!.id, peerId);
+            host.reconnectPlayer(peerId, disconnectedPlayer!.id, newState);
             host.broadcastState(newState);
             return newState;
           });
         } else {
+          logger.debug("[Host] No disconnected player found for reconnection:", name, playerId);
           // Not a reconnection, proceed as new join
           reject("Not a reconnection");
         }
@@ -577,7 +600,12 @@ export function useHostGame() {
           const player = prev.players.find((p) => p.connectionId === peerId);
           if (!player) return prev;
 
-          const newState = setPlayerConnected(prev, player.id, false);
+          // Mark player as disconnected
+          let newState = setPlayerConnected(prev, player.id, false);
+
+          // Skip to next player if the disconnected player was current
+          newState = skipDisconnectedPlayer(newState);
+
           host.broadcastState(newState);
           return newState;
         });

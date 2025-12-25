@@ -238,6 +238,36 @@ export function getCurrentPlayer(state: GameState): Player | null {
 }
 
 /**
+ * Skips to the next connected player if the current player is disconnected
+ * Used to prevent the game from getting stuck when a player disconnects during their turn
+ * @param state - Current game state
+ * @returns Updated game state with current player advanced if needed
+ */
+export function skipDisconnectedPlayer(state: GameState): GameState {
+  if (state.phase !== "playing") return state;
+
+  const currentPlayer = getCurrentPlayer(state);
+
+  // If current player is connected, no need to skip
+  if (currentPlayer && currentPlayer.isConnected && !currentPlayer.isSpectator) {
+    return state;
+  }
+
+  // Current player is disconnected or doesn't exist, advance to next connected player
+  const nextIndex = getNextPlayerIndex(state);
+
+  // If we couldn't find any connected players, return state unchanged
+  if (nextIndex === state.currentPlayerIndex) {
+    return state;
+  }
+
+  return {
+    ...state,
+    currentPlayerIndex: nextIndex,
+  };
+}
+
+/**
  * Checks if it's a specific player's turn
  * @param state - Current game state
  * @param playerId - ID of the player to check
