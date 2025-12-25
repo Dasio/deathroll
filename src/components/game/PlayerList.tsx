@@ -9,6 +9,7 @@ interface PlayerListProps {
   myPlayerId?: string;
   lastLoserId?: string;
   showScores?: boolean;
+  showCoins?: boolean;
   onRemove?: (playerId: string) => void;
   onKick?: (playerId: string) => void;
 }
@@ -19,6 +20,7 @@ export const PlayerList = memo(function PlayerList({
   myPlayerId,
   lastLoserId,
   showScores = false,
+  showCoins = false,
   onRemove,
   onKick,
 }: PlayerListProps) {
@@ -92,6 +94,11 @@ export const PlayerList = memo(function PlayerList({
           </div>
 
           <div className="flex items-center gap-3">
+            {showCoins && (
+              <span className="text-[var(--accent)] font-mono text-sm">
+                {player.coins} 🪙
+              </span>
+            )}
             {showScores && (
               <span className="text-[var(--danger)] font-mono">
                 {player.losses} 💀

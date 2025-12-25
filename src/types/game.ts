@@ -9,6 +9,7 @@ export interface Player {
   color: string; // hex color for avatar
   emoji: string; // emoji avatar
   teamId?: string; // optional team assignment
+  coins: number; // Strategic coin currency for abilities
 }
 
 export interface Team {
@@ -45,6 +46,13 @@ export interface GameState {
   lastLoserId: string | null; // Who just lost (for brief display)
   lastLoserTeamId: string | null; // Which team just lost (for team mode)
   roundNumber: number;
+  // Strategic coin system
+  coinsEnabled: boolean; // Whether coin system is enabled
+  initialCoins: number; // Starting coins per player (0-5)
+  maxCoins: number; // Maximum coins a player can have (default 5)
+  rollTwicePlayerId: string | null; // Player who activated roll-twice (if any)
+  rollTwiceResults: [number, number] | null; // Two roll results (if roll-twice active)
+  nextPlayerOverride: string | null; // Override for next player (set by coin ability)
 }
 
 export function createInitialGameState(): GameState {
@@ -65,5 +73,12 @@ export function createInitialGameState(): GameState {
     lastLoserId: null,
     lastLoserTeamId: null,
     roundNumber: 1,
+    // Strategic coin system
+    coinsEnabled: false, // Disabled by default
+    initialCoins: 3, // Default 3 coins per player
+    maxCoins: 5, // Maximum 5 coins
+    rollTwicePlayerId: null,
+    rollTwiceResults: null,
+    nextPlayerOverride: null,
   };
 }

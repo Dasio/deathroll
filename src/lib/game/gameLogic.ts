@@ -104,6 +104,37 @@ export function setFinal10Mode(state: GameState, enabled: boolean): GameState {
 }
 
 /**
+ * Enables or disables the strategic coin system
+ * @param state - Current game state
+ * @param enabled - Whether coin system should be enabled
+ * @returns Updated game state with coin system toggled
+ */
+export function setCoinsEnabled(state: GameState, enabled: boolean): GameState {
+  return {
+    ...state,
+    coinsEnabled: enabled,
+  };
+}
+
+/**
+ * Sets the initial number of coins each player starts with
+ * @param state - Current game state
+ * @param coins - Initial coin count (0-5)
+ * @returns Updated game state with initial coins set
+ */
+export function setInitialCoins(state: GameState, coins: number): GameState {
+  const clampedCoins = Math.max(0, Math.min(coins, state.maxCoins));
+  return {
+    ...state,
+    initialCoins: clampedCoins,
+    // Update existing players' coins if in lobby
+    players: state.phase === "lobby"
+      ? state.players.map((p) => ({ ...p, coins: clampedCoins }))
+      : state.players,
+  };
+}
+
+/**
  * Gets the team for a given player
  * @param state - Current game state
  * @param playerId - ID of the player
@@ -124,7 +155,7 @@ export function getPlayerTeam(state: GameState, playerId: string): Team | null {
 export function addPlayer(state: GameState, player: Player): GameState {
   return {
     ...state,
-    players: [...state.players, { ...player, losses: 0 }],
+    players: [...state.players, { ...player, losses: 0, coins: state.initialCoins }],
   };
 }
 
@@ -197,6 +228,138 @@ export function findDisconnectedPlayerByName(
     state.players.find((p) => p.name === name && !p.isConnected && !p.isLocal) ??
     null
   );
+}
+
+/**
+ * Awards a coin to a player (capped at maxCoins)
+ * @param state - Current game state
+ * @param playerId - ID of the player to award coin to
+ * @param amount - Number of coins to award (default 1)
+ * @returns Updated game state with coins awarded
+ */
+export function awardCoins(state: GameState, playerId: string, amount: number = 1): GameState {
+  if (!state.coinsEnabled) return state;
+
+  return {
+    ...state,
+    players: state.players.map((p) =>
+      p.id === playerId
+        ? { ...p, coins: Math.min(p.coins + amount, state.maxCoins) }
+        : p
+    ),
+  };
+}
+
+/**
+ * Spends a coin from a player (if they have enough)
+ * @param state - Current game state
+ * @param playerId - ID of the player spending coin
+ * @param amount - Number of coins to spend (default 1)
+ * @returns Updated game state with coins spent, or null if player doesn't have enough
+ */
+export function spendCoins(state: GameState, playerId: string, amount: number = 1): GameState | null {
+  if (!state.coinsEnabled) return null;
+
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player || player.coins < amount) return null;
+
+  return {
+    ...state,
+    players: state.players.map((p) =>
+      p.id === playerId ? { ...p, coins: p.coins - amount } : p
+    ),
+  };
+}
+
+/**
+ * Checks if a player can afford a coin-based action
+ * @param state - Current game state
+ * @param playerId - ID of the player
+ * @param cost - Cost in coins (default 1)
+ * @returns True if player has enough coins, false otherwise
+ */
+export function canAffordAction(state: GameState, playerId: string, cost: number = 1): boolean {
+  if (!state.coinsEnabled) return false;
+
+  const player = state.players.find((p) => p.id === playerId);
+  return player ? player.coins >= cost : false;
+}
+
+/**
+ * Sets the next player manually (for coin-based "choose next player" ability)
+ * @param state - Current game state
+ * @param targetPlayerId - ID of the player to go next
+ * @returns Updated game state with new current player, or null if invalid
+ */
+export function setNextPlayer(state: GameState, targetPlayerId: string): GameState | null {
+  const targetIndex = state.players.findIndex((p) => p.id === targetPlayerId);
+
+  // Validate target
+  if (targetIndex === -1) return null;
+  const targetPlayer = state.players[targetIndex];
+  if (!targetPlayer.isConnected || targetPlayer.isSpectator) return null;
+
+  return {
+    ...state,
+    currentPlayerIndex: targetIndex,
+  };
+}
+
+/**
+ * Activates "Roll Twice" ability for a player (costs 1 coin)
+ * Player will roll twice and choose which result to keep
+ * @param state - Current game state
+ * @param playerId - ID of the player activating roll twice
+ * @returns Updated game state with roll twice activated, or null if player can't afford
+ */
+export function activateRollTwice(state: GameState, playerId: string): GameState | null {
+  if (!canAffordAction(state, playerId, 1)) return null;
+
+  const newState = spendCoins(state, playerId, 1);
+  if (!newState) return null;
+
+  return {
+    ...newState,
+    rollTwicePlayerId: playerId,
+  };
+}
+
+/**
+ * Sets next player override (costs 1 coin)
+ * After current player's turn, specified player goes next instead of rotation
+ * @param state - Current game state
+ * @param playerId - ID of the player setting the override
+ * @param targetPlayerId - ID of the player who should go next
+ * @returns Updated game state with override set, or null if player can't afford
+ */
+export function setNextPlayerOverride(state: GameState, playerId: string, targetPlayerId: string): GameState | null {
+  if (!canAffordAction(state, playerId, 1)) return null;
+
+  // Validate target
+  const targetPlayer = state.players.find((p) => p.id === targetPlayerId);
+  if (!targetPlayer || targetPlayer.isSpectator || !targetPlayer.isConnected) return null;
+  if (targetPlayerId === playerId) return null; // Can't choose yourself
+
+  const newState = spendCoins(state, playerId, 1);
+  if (!newState) return null;
+
+  return {
+    ...newState,
+    nextPlayerOverride: targetPlayerId,
+  };
+}
+
+/**
+ * Clears roll-twice state (called after roll is complete)
+ * @param state - Current game state
+ * @returns Updated game state with roll-twice cleared
+ */
+export function clearRollTwice(state: GameState): GameState {
+  return {
+    ...state,
+    rollTwicePlayerId: null,
+    rollTwiceResults: null,
+  };
 }
 
 /**
@@ -361,14 +524,36 @@ export function calculateAnimationDuration(maxRoll: number, final10ModeEnabled: 
  * @param playerId - ID of the player making the roll
  * @returns Object with updated state (result hidden) and the roll result for host
  */
-export function initiateRoll(state: GameState, playerId: string): { state: GameState; rollResult: number | null } {
+export function initiateRoll(state: GameState, playerId: string): { state: GameState; rollResult: number | null; rollTwiceResults?: [number, number] | null } {
   if (state.phase !== "playing") return { state, rollResult: null };
   if (!isPlayerTurn(state, playerId)) return { state, rollResult: null };
 
   const player = state.players.find((p) => p.id === playerId);
   if (!player || player.isSpectator) return { state, rollResult: null };
 
-  const result = generateRoll(state.currentMaxRoll);
+  // Check if roll-twice is active for this player
+  const isRollTwice = state.rollTwicePlayerId === playerId;
+
+  let result: number;
+  let rollTwiceResults: [number, number] | null = null;
+
+  if (isRollTwice) {
+    // Generate TWO rolls
+    const roll1 = generateRoll(state.currentMaxRoll);
+    const roll2 = generateRoll(state.currentMaxRoll);
+
+    // If EITHER roll is 1, player automatically loses (no choice given)
+    // This prevents exploiting roll-twice at low ranges
+    if (roll1 === 1 || roll2 === 1) {
+      rollTwiceResults = null; // Don't show picker
+      result = 1; // Force the loss
+    } else {
+      rollTwiceResults = [roll1, roll2];
+      result = roll1; // Default to first roll (player will choose)
+    }
+  } else {
+    result = generateRoll(state.currentMaxRoll);
+  }
 
   // Store the max before this roll (for detecting max rolls later)
   const maxBeforeRoll = state.currentMaxRoll;
@@ -381,9 +566,10 @@ export function initiateRoll(state: GameState, playerId: string): { state: GameS
     lastMaxRoll: maxBeforeRoll,   // Store for max roll detection later
     lastRollPlayerId: playerId,   // Who's rolling
     // lastRoll is NOT set yet! Result hidden from clients!
+    rollTwiceResults: rollTwiceResults, // Store both rolls if roll-twice active
   };
 
-  return { state: newState, rollResult: result };
+  return { state: newState, rollResult: result, rollTwiceResults };
 }
 
 /**
@@ -397,7 +583,8 @@ export function initiateRoll(state: GameState, playerId: string): { state: GameS
  */
 export function completeRoll(state: GameState, playerId: string, rollResult: number): GameState {
   if (state.phase !== "playing") return state;
-  if (!state.isRolling) return state; // No roll in progress
+  // Allow completion if roll-twice picker is active (isRolling=false but rollTwiceResults present)
+  if (!state.isRolling && !state.rollTwiceResults) return state; // No roll in progress
 
   const player = state.players.find((p) => p.id === playerId);
   if (!player || player.isSpectator) return state;
@@ -415,11 +602,14 @@ export function completeRoll(state: GameState, playerId: string, rollResult: num
     timestamp: Date.now(),
   };
 
+  // Check if this was a MAX ROLL (player rolled the maximum possible)
+  const wasMaxRoll = result === (state.lastMaxRoll ?? state.currentMaxRoll) && result > 1;
+
   // Player rolled 1 - they lose this round, game continues
   if (result === 1) {
     const playerTeam = getPlayerTeam(state, playerId);
 
-    return {
+    let updatedState: GameState = {
       ...state,
       isRolling: false,              // Animation complete, result revealed
       lastRoll: result,              // NOW reveal the result!
@@ -441,20 +631,44 @@ export function completeRoll(state: GameState, playerId: string, rollResult: num
       roundNumber: state.roundNumber + 1,
       // Loser stays as current player to start new round
       // (currentPlayerIndex stays the same)
+      // Clear coin ability states
+      nextPlayerOverride: null,
+      rollTwicePlayerId: null,
+      rollTwiceResults: null,
     };
+
+    // Award 1 coin for losing (if coins enabled)
+    updatedState = awardCoins(updatedState, playerId, 1);
+
+    return updatedState;
   }
 
+  // Determine next player (use override if set, otherwise use rotation)
+  const nextPlayerIndex = state.nextPlayerOverride
+    ? state.players.findIndex((p) => p.id === state.nextPlayerOverride)
+    : getNextPlayerIndex(state);
+
   // Continue game with new max and next player
-  return {
+  let updatedState: GameState = {
     ...state,
     isRolling: false,              // Animation complete, result revealed
     lastRoll: result,              // NOW reveal the result!
     currentMaxRoll: result,
     rollHistory: addToRollHistory(state.rollHistory, rollEntry),
-    currentPlayerIndex: getNextPlayerIndex(state),
+    currentPlayerIndex: nextPlayerIndex >= 0 ? nextPlayerIndex : getNextPlayerIndex(state),
     lastLoserId: null, // Clear last loser when game continues normally
     lastLoserTeamId: null, // Clear last loser team when game continues normally
+    nextPlayerOverride: null, // Clear override after using it
+    rollTwicePlayerId: null, // Clear roll-twice state
+    rollTwiceResults: null,
   };
+
+  // Award 1 coin for rolling MAX (if coins enabled)
+  if (wasMaxRoll) {
+    updatedState = awardCoins(updatedState, playerId, 1);
+  }
+
+  return updatedState;
 }
 
 /**
@@ -550,8 +764,8 @@ export function resetGame(state: GameState): GameState {
     lastLoserId: null,
     lastLoserTeamId: null,
     roundNumber: 1,
-    // Reset all player scores
-    players: state.players.map((p) => ({ ...p, losses: 0 })),
+    // Reset all player scores and coins
+    players: state.players.map((p) => ({ ...p, losses: 0, coins: state.initialCoins })),
     // Reset all team scores
     teams: state.teams.map((t) => ({ ...t, losses: 0 })),
   };

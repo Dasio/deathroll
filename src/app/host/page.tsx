@@ -42,6 +42,9 @@ export default function HostPage() {
     assignPlayerToTeam,
     setTeamMode,
     setFinal10Mode,
+    setCoinsEnabled,
+    setInitialCoins,
+    localChooseRoll,
   } = useHostGame();
 
   const { isSupported: wakeLockSupported, isActive: wakeLockActive, requestWakeLock, releaseWakeLock } = useWakeLock();
@@ -60,6 +63,11 @@ export default function HostPage() {
   const [newTeamColor, setNewTeamColor] = useState("#3b82f6");
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
 
+  // Coin system UI state
+  const [showPlayerSelector, setShowPlayerSelector] = useState(false);
+  const [localRollTwice, setLocalRollTwice] = useState(false);
+  const [localNextPlayerOverride, setLocalNextPlayerOverride] = useState<string | null>(null);
+
   const [animationComplete, setAnimationComplete] = useState(true);
 
   // Track when animation starts (use isRolling flag)
@@ -68,6 +76,13 @@ export default function HostPage() {
       setAnimationComplete(false);
     }
   }, [gameState.isRolling]);
+
+  // Set animation complete when roll-twice picker is shown
+  useEffect(() => {
+    if (!gameState.isRolling && gameState.rollTwiceResults) {
+      setAnimationComplete(true);
+    }
+  }, [gameState.isRolling, gameState.rollTwiceResults]);
 
   // Use ref for latest gameState to avoid callback identity changes during animation
   const gameStateRef = useRef(gameState);
@@ -116,15 +131,19 @@ export default function HostPage() {
         if (rangeToUse) {
           setSessionMaxRoll(rangeToUse);
         }
-        localRoll(currentPlayer.id, rangeToUse);
+        localRoll(currentPlayer.id, rangeToUse, localRollTwice, localNextPlayerOverride);
         setCustomRange(null);
+        // Clear local coin ability state after rolling
+        setLocalRollTwice(false);
+        setLocalNextPlayerOverride(null);
+        setShowPlayerSelector(false);
         setTimeout(() => setIsRolling(false), 500);
       }
     };
 
     window.addEventListener("keydown", handleKeyPress);
     return () => window.removeEventListener("keydown", handleKeyPress);
-  }, [gameState.phase, currentPlayer, isRolling, animationComplete, canSetRange, customRange, gameState.currentMaxRoll, localRoll]);
+  }, [gameState.phase, currentPlayer, isRolling, animationComplete, canSetRange, customRange, gameState.currentMaxRoll, localRoll, localRollTwice, localNextPlayerOverride]);
 
   useEffect(() => {
     let mounted = true;
@@ -263,6 +282,7 @@ export default function HostPage() {
           </h2>
           <PlayerList
             players={gameState.players}
+            showCoins={gameState.coinsEnabled}
             onRemove={(id) => {
               const player = gameState.players.find((p) => p.id === id);
               if (player?.isLocal) removeLocalPlayer(id);
@@ -310,6 +330,36 @@ export default function HostPage() {
                 Final 10 Mode (visual effects when max roll drops below 10)
               </label>
             </div>
+
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="coinsMode"
+                checked={gameState.coinsEnabled}
+                onChange={(e) => setCoinsEnabled(e.target.checked)}
+                className="w-4 h-4 rounded border-[var(--border)] bg-[var(--background)] text-[var(--accent)] focus:ring-[var(--accent)]"
+              />
+              <label htmlFor="coinsMode" className="text-[var(--muted)]">
+                Strategic Coins (spend coins to reroll or choose next player)
+              </label>
+            </div>
+
+            {gameState.coinsEnabled && (
+              <div className="flex items-center gap-4 ml-7">
+                <label className="text-[var(--muted)] text-sm">Starting Coins (0-5):</label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={5}
+                  value={gameState.initialCoins}
+                  onChange={(e) => setInitialCoins(Number(e.target.value))}
+                  className="w-20 text-center"
+                />
+                <span className="text-xs text-[var(--muted)]">
+                  1 coin = Reroll or Choose Next Player
+                </span>
+              </div>
+            )}
           </div>
         </Card>
 
@@ -498,24 +548,31 @@ export default function HostPage() {
       )}
 
       <Card className="mb-6">
-        <RollDisplay
-          currentMax={gameState.currentMaxRoll}
-          lastRoll={gameState.lastRoll}
-          lastMaxRoll={gameState.lastMaxRoll}
-          isRolling={gameState.isRolling}
-          final10Mode={gameState.final10Mode}
-          onAnimationComplete={handleAnimationComplete}
-        />
+        {!gameState.rollTwiceResults || gameState.isRolling ? (
+          <RollDisplay
+            currentMax={gameState.currentMaxRoll}
+            lastRoll={gameState.lastRoll}
+            lastMaxRoll={gameState.lastMaxRoll}
+            isRolling={gameState.isRolling}
+            final10Mode={gameState.final10Mode}
+            onAnimationComplete={handleAnimationComplete}
+          />
+        ) : (
+          <div className="text-center py-8">
+            <div className="text-2xl font-bold mb-2">🎲🎲 Pick Your Roll</div>
+            <div className="text-[var(--muted)]">Choose which result you want to keep</div>
+          </div>
+        )}
 
         {currentPlayer && (
           <div className="text-center mt-4">
             <div className="text-lg text-[var(--muted)] mb-4">
               {currentPlayer.name}&apos;s turn
-              {canSetRange && " - Choose starting range"}
+              {canSetRange && !gameState.rollTwiceResults && " - Choose starting range"}
             </div>
 
             {/* Range selector at start of round for local players */}
-            {currentIsLocal && canSetRange && (
+            {currentIsLocal && canSetRange && !gameState.rollTwiceResults && (
               <div className="flex items-center justify-center gap-2 mb-4">
                 <Input
                   type="number"
@@ -527,7 +584,106 @@ export default function HostPage() {
               </div>
             )}
 
-            {currentIsLocal && (
+            {/* Roll Picker UI for local players with roll-twice active */}
+            {currentIsLocal && !gameState.isRolling && gameState.rollTwiceResults && gameState.rollTwicePlayerId === currentPlayer?.id && (
+              <div className="mb-4 p-4 bg-[var(--accent)]/10 rounded border">
+                <div className="text-sm font-semibold mb-3 text-center">
+                  Pick your roll:
+                </div>
+                <div className="flex gap-3 justify-center">
+                  {gameState.rollTwiceResults.map((roll, index) => (
+                    <Button
+                      key={index}
+                      size="lg"
+                      onClick={() => localChooseRoll(currentPlayer.id, roll)}
+                      className="px-8 py-6 text-2xl font-bold"
+                    >
+                      {roll.toLocaleString()}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Coin ability buttons for local players */}
+            {currentIsLocal && gameState.coinsEnabled && currentPlayer && !gameState.rollTwiceResults && (
+              <div className="flex flex-col gap-2 mb-4">
+                <div className="flex gap-2 justify-center flex-wrap">
+                  {/* Choose Next Player Button - only show with 3+ players */}
+                  {(() => {
+                    const activePlayers = gameState.players.filter((p) => !p.isSpectator && p.isConnected);
+                    if (activePlayers.length <= 2) return null; // Hide with 2 or fewer players
+
+                    const myPlayer = gameState.players.find((p) => p.id === currentPlayer.id);
+                    const canAfford = myPlayer && myPlayer.coins >= 1;
+                    const isActive = localNextPlayerOverride !== null;
+
+                    return (
+                      <Button
+                        variant={isActive ? "primary" : "secondary"}
+                        size="sm"
+                        onClick={() => {
+                          if (isActive) {
+                            // Cancel
+                            setLocalNextPlayerOverride(null);
+                            setShowPlayerSelector(false);
+                          } else {
+                            // Show selector
+                            setShowPlayerSelector(!showPlayerSelector);
+                          }
+                        }}
+                        disabled={!isActive && !canAfford}
+                      >
+                        {isActive ? "✓ Next Player Set (click to cancel)" : `🎯 Choose Next (1 🪙)`}
+                      </Button>
+                    );
+                  })()}
+
+                  {/* Roll Twice Button */}
+                  {(() => {
+                    const myPlayer = gameState.players.find((p) => p.id === currentPlayer.id);
+                    const canAfford = myPlayer && myPlayer.coins >= 1;
+
+                    return (
+                      <Button
+                        variant={localRollTwice ? "primary" : "secondary"}
+                        size="sm"
+                        onClick={() => setLocalRollTwice(!localRollTwice)}
+                        disabled={!localRollTwice && !canAfford}
+                      >
+                        {localRollTwice ? "✓ Roll Twice (click to cancel)" : `🎲 Roll Twice (1 🪙)`}
+                      </Button>
+                    );
+                  })()}
+                </div>
+
+                {/* Player Selector */}
+                {showPlayerSelector && (
+                  <div className="p-3 bg-[var(--background)] rounded border">
+                    <div className="text-sm font-semibold mb-2">Choose who goes next:</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {gameState.players
+                        .filter((p) => p.id !== currentPlayer.id && !p.isSpectator && p.isConnected)
+                        .map((player) => (
+                          <Button
+                            key={player.id}
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => {
+                              setLocalNextPlayerOverride(player.id);
+                              setShowPlayerSelector(false);
+                            }}
+                          >
+                            {player.emoji} {player.name}
+                          </Button>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {currentIsLocal && !gameState.rollTwiceResults && (
               <>
                 <Button
                   size="lg"
@@ -540,8 +696,12 @@ export default function HostPage() {
                     if (rangeToUse) {
                       setSessionMaxRoll(rangeToUse);
                     }
-                    localRoll(currentPlayer.id, rangeToUse);
+                    localRoll(currentPlayer.id, rangeToUse, localRollTwice, localNextPlayerOverride);
                     setCustomRange(null);
+                    // Clear local coin ability state after rolling
+                    setLocalRollTwice(false);
+                    setLocalNextPlayerOverride(null);
+                    setShowPlayerSelector(false);
                   }}
                   disabled={!animationComplete}
                   className="px-12"
@@ -579,6 +739,7 @@ export default function HostPage() {
             currentPlayerId={currentPlayer?.id}
             lastLoserId={showLoserNotification ? notificationLoserId ?? undefined : undefined}
             showScores
+            showCoins={gameState.coinsEnabled}
             onKick={(id) => kickPlayer(id)}
           />
         )}

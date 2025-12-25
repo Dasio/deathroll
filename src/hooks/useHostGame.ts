@@ -25,7 +25,11 @@ import {
   assignPlayerToTeam,
   setTeamMode,
   setFinal10Mode,
+  setCoinsEnabled,
+  setInitialCoins,
   skipDisconnectedPlayer,
+  activateRollTwice,
+  setNextPlayerOverride,
 } from "@/lib/game/gameLogic";
 import { PlayerMessage } from "@/types/messages";
 import {
@@ -170,6 +174,7 @@ export function useHostGame() {
             isSpectator: spectator,
             color: avatar.color,
             emoji: avatar.emoji,
+            coins: prev.initialCoins,
           };
 
           const newState = addPlayer(prev, player);
@@ -227,13 +232,30 @@ export function useHostGame() {
           break;
         }
 
+        // Apply coin abilities if requested (spend coins atomically with roll)
+        if (message.rollTwice) {
+          const newState = activateRollTwice(currentState, player.id);
+          if (newState) {
+            currentState = newState;
+            console.log("[Host] Player activated roll-twice with roll:", player.name);
+          }
+        }
+
+        if (message.nextPlayerOverride) {
+          const newState = setNextPlayerOverride(currentState, player.id, message.nextPlayerOverride);
+          if (newState) {
+            currentState = newState;
+            console.log("[Host] Player set next player override with roll:", player.name, "->", message.nextPlayerOverride);
+          }
+        }
+
         // Apply range override if provided
         if (message.overrideRange != null && currentState.currentMaxRoll === currentState.initialMaxRoll) {
           currentState = { ...currentState, currentMaxRoll: message.overrideRange };
         }
 
         // Phase 1: Initiate roll (starts animation)
-        const { state: stateWithRoll, rollResult } = initiateRoll(currentState, player.id);
+        const { state: stateWithRoll, rollResult, rollTwiceResults } = initiateRoll(currentState, player.id);
         setGameState(stateWithRoll);
         host.broadcastState(stateWithRoll);
 
@@ -250,6 +272,19 @@ export function useHostGame() {
 
         setTimeout(() => {
           try {
+            // If roll-twice is active, DON'T auto-complete - wait for player to choose
+            if (rollTwiceResults) {
+              // Just end the animation, but don't complete the roll yet
+              const stateAfterAnimation = {
+                ...gameStateRef.current,
+                isRolling: false, // Animation complete, show the picker
+                rollTwiceResults: rollTwiceResults, // Explicitly preserve the roll options
+              };
+              setGameState(stateAfterAnimation);
+              host.broadcastState(stateAfterAnimation);
+              return;
+            }
+
             // Phase 2: Complete roll (applies consequences)
             const finalState = completeRoll(gameStateRef.current, player.id, rollResult!);
 
@@ -333,6 +368,27 @@ export function useHostGame() {
         host.broadcastState(newState);
         break;
       }
+
+
+      case "CHOOSE_ROLL": {
+        const currentState = gameStateRef.current;
+        const player = currentState.players.find((p) => p.connectionId === peerId);
+        if (!player) break;
+        if (!isPlayerTurn(currentState, player.id)) break;
+        if (currentState.rollTwicePlayerId !== player.id) break;
+        if (!currentState.rollTwiceResults) break;
+
+        // Validate chosen roll is one of the available options
+        if (!currentState.rollTwiceResults.includes(message.chosenRoll)) break;
+
+        console.log("[Host] Player chose roll:", player.name, message.chosenRoll);
+
+        // Complete the roll with the chosen result
+        const newState = completeRoll(currentState, player.id, message.chosenRoll);
+        setGameState(newState);
+        host.broadcastState(newState);
+        break;
+      }
     }
   }, []);
 
@@ -365,6 +421,7 @@ export function useHostGame() {
         isSpectator: false,
         color: avatar.color,
         emoji: avatar.emoji,
+        coins: prev.initialCoins,
       };
       const newState = addPlayer(prev, player);
       hostRef.current?.broadcastState(newState);
@@ -382,7 +439,7 @@ export function useHostGame() {
     updateState((prev) => startGame(prev, initialRange));
   }, [updateState]);
 
-  const handleLocalRoll = useCallback((playerId: string, overrideRange?: number | null) => {
+  const handleLocalRoll = useCallback((playerId: string, overrideRange?: number | null, rollTwice?: boolean, nextPlayerOverride?: string | null) => {
     const host = hostRef.current;
     if (!host) return;
 
@@ -394,13 +451,30 @@ export function useHostGame() {
       return;
     }
 
+    // Apply coin abilities if requested (spend coins atomically with roll)
+    if (rollTwice) {
+      const newState = activateRollTwice(currentState, playerId);
+      if (newState) {
+        currentState = newState;
+        console.log("[Host] Local player activated roll-twice with roll");
+      }
+    }
+
+    if (nextPlayerOverride) {
+      const newState = setNextPlayerOverride(currentState, playerId, nextPlayerOverride);
+      if (newState) {
+        currentState = newState;
+        console.log("[Host] Local player set next player override with roll:", nextPlayerOverride);
+      }
+    }
+
     // Apply range override if provided (for combined set-range-and-roll)
     if (overrideRange != null && currentState.currentMaxRoll === currentState.initialMaxRoll) {
       currentState = { ...currentState, currentMaxRoll: overrideRange };
     }
 
     // Phase 1: Initiate roll (starts animation)
-    const { state: stateWithRoll, rollResult } = initiateRoll(currentState, playerId);
+    const { state: stateWithRoll, rollResult, rollTwiceResults } = initiateRoll(currentState, playerId);
     setGameState(stateWithRoll);
     host.broadcastState(stateWithRoll);
 
@@ -417,6 +491,19 @@ export function useHostGame() {
 
     setTimeout(() => {
       try {
+        // If roll-twice is active, DON'T auto-complete - wait for player to choose
+        if (rollTwiceResults) {
+          // Just end the animation, but don't complete the roll yet
+          const stateAfterAnimation = {
+            ...gameStateRef.current,
+            isRolling: false, // Animation complete, show the picker
+            rollTwiceResults: rollTwiceResults, // Explicitly preserve the roll options
+          };
+          setGameState(stateAfterAnimation);
+          host.broadcastState(stateAfterAnimation);
+          return;
+        }
+
         // Phase 2: Complete roll (applies consequences)
         const finalState = completeRoll(gameStateRef.current, playerId, rollResult!);
 
@@ -613,6 +700,7 @@ export function useHostGame() {
             isSpectator: spectator,
             color: avatar.color,
             emoji: avatar.emoji,
+            coins: prev.initialCoins,
           };
 
           const newState = addPlayer(prev, player);
@@ -680,6 +768,29 @@ export function useHostGame() {
     updateState((prev) => setFinal10Mode(prev, enabled));
   }, [updateState]);
 
+  const handleSetCoinsEnabled = useCallback((enabled: boolean) => {
+    updateState((prev) => setCoinsEnabled(prev, enabled));
+  }, [updateState]);
+
+  const handleSetInitialCoins = useCallback((coins: number) => {
+    updateState((prev) => setInitialCoins(prev, coins));
+  }, [updateState]);
+
+
+  const handleLocalChooseRoll = useCallback((playerId: string, chosenRoll: number) => {
+    const host = hostRef.current;
+    if (!host) return;
+
+    const currentState = gameStateRef.current;
+
+    // Validate chosen roll is one of the available options
+    if (!currentState.rollTwiceResults?.includes(chosenRoll)) return;
+
+    const newState = completeRoll(currentState, playerId, chosenRoll);
+    setGameState(newState);
+    host.broadcastState(newState);
+  }, []);
+
   return {
     roomCode,
     status,
@@ -703,5 +814,8 @@ export function useHostGame() {
     assignPlayerToTeam: handleAssignPlayerToTeam,
     setTeamMode: handleSetTeamMode,
     setFinal10Mode: handleSetFinal10Mode,
+    setCoinsEnabled: handleSetCoinsEnabled,
+    setInitialCoins: handleSetInitialCoins,
+    localChooseRoll: handleLocalChooseRoll,
   };
 }

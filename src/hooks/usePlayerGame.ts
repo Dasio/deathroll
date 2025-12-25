@@ -153,12 +153,16 @@ export function usePlayerGame() {
     }
   }, [playerId]);
 
-  const requestRoll = useCallback((overrideRange?: number | null) => {
-    playerRef.current?.requestRoll(overrideRange);
+  const requestRoll = useCallback((overrideRange?: number | null, rollTwice?: boolean, nextPlayerOverride?: string | null) => {
+    playerRef.current?.requestRoll(overrideRange, rollTwice, nextPlayerOverride);
   }, []);
 
   const setRange = useCallback((maxRange: number) => {
     playerRef.current?.setRange(maxRange);
+  }, []);
+
+  const chooseRoll = useCallback((roll: number) => {
+    playerRef.current?.chooseRoll(roll);
   }, []);
 
   const disconnect = useCallback(() => {
@@ -214,6 +218,7 @@ export function usePlayerGame() {
     joinRoom,
     requestRoll,
     setRange,
+    chooseRoll,
     disconnect,
     manualReconnect,
     reconnectWithSaved,

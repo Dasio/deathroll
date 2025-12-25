@@ -271,12 +271,16 @@ export class PlayerPeer {
     }
   }
 
-  requestRoll(overrideRange?: number | null) {
-    this.sendToHost({ type: "ROLL_REQUEST", overrideRange });
+  requestRoll(overrideRange?: number | null, rollTwice?: boolean, nextPlayerOverride?: string | null) {
+    this.sendToHost({ type: "ROLL_REQUEST", overrideRange, rollTwice, nextPlayerOverride });
   }
 
   setRange(maxRange: number) {
     this.sendToHost({ type: "SET_RANGE", maxRange });
+  }
+
+  chooseRoll(chosenRoll: number) {
+    this.sendToHost({ type: "CHOOSE_ROLL", chosenRoll });
   }
 
   private startHeartbeat() {

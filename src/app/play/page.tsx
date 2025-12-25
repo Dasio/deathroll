@@ -37,6 +37,7 @@ function PlayContent() {
     joinRoom,
     requestRoll,
     setRange,
+    chooseRoll,
     disconnect,
     manualReconnect,
     reconnectWithSaved,
@@ -58,6 +59,11 @@ function PlayContent() {
   const [notificationLoserId, setNotificationLoserId] = useState<string | null>(null);
   const previousMyTurnRef = useRef(false);
   const [isRolling, setIsRolling] = useState(false);
+
+  // Coin ability states
+  const [showPlayerSelector, setShowPlayerSelector] = useState(false);
+  const [localRollTwice, setLocalRollTwice] = useState(false);
+  const [localNextPlayerOverride, setLocalNextPlayerOverride] = useState<string | null>(null);
 
   // Handle animation completion - show loser notification after dice animation
   const handleAnimationComplete = useCallback(() => {
@@ -104,6 +110,13 @@ function PlayContent() {
       setAnimationComplete(false);
     }
   }, [gameState.isRolling]);
+
+  // Set animation complete when roll-twice picker is shown
+  useEffect(() => {
+    if (!gameState.isRolling && gameState.rollTwiceResults) {
+      setAnimationComplete(true);
+    }
+  }, [gameState.isRolling, gameState.rollTwiceResults]);
 
   // Use ref for latest gameState to avoid callback identity changes during animation
   const gameStateRef = useRef(gameState);
@@ -153,15 +166,19 @@ function PlayContent() {
         if (rangeToUse) {
           setSessionMaxRoll(rangeToUse);
         }
-        requestRoll(rangeToUse);
+        requestRoll(rangeToUse, localRollTwice, localNextPlayerOverride);
         setCustomRange(null);
+        // Clear local coin ability state after rolling
+        setLocalRollTwice(false);
+        setLocalNextPlayerOverride(null);
+        setShowPlayerSelector(false);
         setTimeout(() => setIsRolling(false), 500);
       }
     };
 
     window.addEventListener("keydown", handleKeyPress);
     return () => window.removeEventListener("keydown", handleKeyPress);
-  }, [gameState.phase, myTurn, isRolling, animationComplete, canSetRange, customRange, gameState.currentMaxRoll, requestRoll, isSpectator]);
+  }, [gameState.phase, myTurn, isRolling, animationComplete, canSetRange, customRange, gameState.currentMaxRoll, requestRoll, isSpectator, localRollTwice, localNextPlayerOverride]);
 
   const handleJoin = async () => {
     if (roomCode.trim() && playerName.trim()) {
@@ -386,7 +403,11 @@ function PlayContent() {
           <h2 className="text-lg font-semibold mb-4">
             Players ({gameState.players.length})
           </h2>
-          <PlayerList players={gameState.players} myPlayerId={playerId ?? undefined} />
+          <PlayerList
+            players={gameState.players}
+            myPlayerId={playerId ?? undefined}
+            showCoins={gameState.coinsEnabled}
+          />
         </Card>
 
         <div className="text-center text-[var(--muted)]">
@@ -436,15 +457,22 @@ function PlayContent() {
       )}
 
       <Card className="mb-6">
-        <RollDisplay
-          currentMax={gameState.currentMaxRoll}
-          lastRoll={gameState.lastRoll}
-          lastMaxRoll={gameState.lastMaxRoll}
-          isRolling={gameState.isRolling}
-          isMyLoss={gameState.lastLoserId === playerId}
-          final10Mode={gameState.final10Mode}
-          onAnimationComplete={handleAnimationCompleteWithFlag}
-        />
+        {!gameState.rollTwiceResults || gameState.isRolling ? (
+          <RollDisplay
+            currentMax={gameState.currentMaxRoll}
+            lastRoll={gameState.lastRoll}
+            lastMaxRoll={gameState.lastMaxRoll}
+            isRolling={gameState.isRolling}
+            isMyLoss={gameState.lastLoserId === playerId}
+            final10Mode={gameState.final10Mode}
+            onAnimationComplete={handleAnimationCompleteWithFlag}
+          />
+        ) : (
+          <div className="text-center py-8">
+            <div className="text-2xl font-bold mb-2">🎲🎲 Pick Your Roll</div>
+            <div className="text-[var(--muted)]">Choose which result you want to keep</div>
+          </div>
+        )}
 
         <div className="text-center mt-4">
           {isSpectator ? (
@@ -455,11 +483,11 @@ function PlayContent() {
             <>
               <div className="text-lg text-[var(--success)] font-bold mb-4">
                 YOUR TURN!
-                {canSetRange && " - Choose starting range"}
+                {canSetRange && !gameState.rollTwiceResults && " - Choose starting range"}
               </div>
 
               {/* Range selector at start of round */}
-              {canSetRange && (
+              {canSetRange && !gameState.rollTwiceResults && (
                 <div className="flex items-center justify-center gap-2 mb-4">
                   <Input
                     type="number"
@@ -471,32 +499,141 @@ function PlayContent() {
                 </div>
               )}
 
-              <>
-                <Button
-                  size="lg"
-                  onClick={() => {
-                    initializeSounds(); // Ensure sounds are initialized on interaction
-                    const rangeToUse = canSetRange && customRange && customRange !== gameState.currentMaxRoll
-                      ? customRange
-                      : undefined;
-                    // Save the chosen range for the session
-                    if (rangeToUse) {
-                      setSessionMaxRoll(rangeToUse);
-                    }
-                    requestRoll(rangeToUse);
-                    setCustomRange(null);
-                  }}
-                  disabled={!animationComplete}
-                  className="px-12 py-4 text-xl"
-                >
-                  ROLL (1-{(canSetRange && customRange ? customRange : (animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})
-                </Button>
-                {!isMobile && (
-                  <div className="text-xs text-[var(--muted)] mt-2">
-                    {animationComplete ? 'Press Space to roll' : 'Dice rolling...'}
+              {/* Coin Abilities */}
+              {gameState.coinsEnabled && playerId && !gameState.rollTwiceResults && (
+                <div className="flex flex-col gap-2 mb-4">
+                  <div className="flex gap-2 justify-center flex-wrap">
+                    {/* Choose Next Player Button */}
+                    {(() => {
+                      const myPlayer = gameState.players.find((p) => p.id === playerId);
+                      const activePlayers = gameState.players.filter((p) => !p.isSpectator && p.isConnected);
+                      const canAfford = myPlayer && myPlayer.coins >= 1;
+                      const isActive = localNextPlayerOverride !== null;
+                      const hasChoice = activePlayers.length > 2; // Need 3+ players for this to be useful
+
+                      if (!hasChoice) return null; // Hide with 2 or fewer players
+
+                      return (
+                        <Button
+                          variant={isActive ? "primary" : "secondary"}
+                          size="sm"
+                          onClick={() => {
+                            if (isActive) {
+                              // Cancel
+                              setLocalNextPlayerOverride(null);
+                              setShowPlayerSelector(false);
+                            } else {
+                              // Show selector
+                              setShowPlayerSelector(!showPlayerSelector);
+                            }
+                          }}
+                          disabled={!isActive && !canAfford}
+                          className="text-sm"
+                        >
+                          {isActive ? "✓ Next Player Set (click to cancel)" : `🎯 Choose Next (1 🪙)`}
+                        </Button>
+                      );
+                    })()}
+
+                    {/* Roll Twice Button */}
+                    {(() => {
+                      const myPlayer = gameState.players.find((p) => p.id === playerId);
+                      const canAfford = myPlayer && myPlayer.coins >= 1;
+
+                      return (
+                        <Button
+                          variant={localRollTwice ? "primary" : "secondary"}
+                          size="sm"
+                          onClick={() => setLocalRollTwice(!localRollTwice)}
+                          disabled={!localRollTwice && !canAfford}
+                          className="text-sm"
+                        >
+                          {localRollTwice ? "✓ Roll Twice (click to cancel)" : `🎲 Roll Twice (1 🪙)`}
+                        </Button>
+                      );
+                    })()}
                   </div>
-                )}
-              </>
+
+                  {/* Player Selector for Choose Next Player */}
+                  {showPlayerSelector && (
+                    <div className="p-3 bg-[var(--background)] rounded border border-[var(--border)]">
+                      <div className="text-sm font-semibold mb-2">Choose who goes next:</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {gameState.players
+                          .filter((p) => p.id !== playerId && !p.isSpectator && p.isConnected)
+                          .map((player) => (
+                            <Button
+                              key={player.id}
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                setLocalNextPlayerOverride(player.id);
+                                setShowPlayerSelector(false);
+                              }}
+                              className="text-xs"
+                            >
+                              {player.emoji} {player.name}
+                            </Button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Roll Result Picker (if roll-twice is active and results available) */}
+              {!gameState.isRolling && gameState.rollTwiceResults && gameState.rollTwicePlayerId === playerId && (
+                <div className="mb-4 p-4 bg-[var(--accent)]/10 rounded border border-[var(--accent)]">
+                  <div className="text-sm font-semibold mb-3 text-center">
+                    Pick your roll:
+                  </div>
+                  <div className="flex gap-3 justify-center">
+                    {gameState.rollTwiceResults.map((roll, index) => (
+                      <Button
+                        key={index}
+                        size="lg"
+                        onClick={() => chooseRoll(roll)}
+                        className="px-8 py-6 text-2xl font-bold"
+                      >
+                        {roll.toLocaleString()}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!gameState.rollTwiceResults && (
+                <>
+                  <Button
+                    size="lg"
+                    onClick={() => {
+                      initializeSounds(); // Ensure sounds are initialized on interaction
+                      const rangeToUse = canSetRange && customRange && customRange !== gameState.currentMaxRoll
+                        ? customRange
+                        : undefined;
+                      // Save the chosen range for the session
+                      if (rangeToUse) {
+                        setSessionMaxRoll(rangeToUse);
+                      }
+                      requestRoll(rangeToUse, localRollTwice, localNextPlayerOverride);
+                      setCustomRange(null);
+                      // Clear local coin ability state after rolling
+                      setLocalRollTwice(false);
+                      setLocalNextPlayerOverride(null);
+                      setShowPlayerSelector(false);
+                    }}
+                    disabled={!animationComplete}
+                    className="px-12 py-4 text-xl"
+                  >
+                    ROLL (1-{(canSetRange && customRange ? customRange : (animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})
+                  </Button>
+                  {!isMobile && (
+                    <div className="text-xs text-[var(--muted)] mt-2">
+                      {animationComplete ? 'Press Space to roll' : 'Dice rolling...'}
+                    </div>
+                  )}
+                </>
+              )}
             </>
           ) : (
             <div className="text-lg text-[var(--muted)]">
@@ -524,6 +661,7 @@ function PlayContent() {
             myPlayerId={playerId ?? undefined}
             lastLoserId={showLoserNotification ? notificationLoserId ?? undefined : undefined}
             showScores
+            showCoins={gameState.coinsEnabled}
           />
         )}
       </Card>

@@ -3,10 +3,11 @@ import { GameState } from "./game";
 // Player -> Host messages
 export type PlayerMessage =
   | { type: "JOIN_REQUEST"; name: string; spectator?: boolean | null; playerId?: string | null }
-  | { type: "ROLL_REQUEST"; overrideRange?: number | null }
+  | { type: "ROLL_REQUEST"; overrideRange?: number | null; rollTwice?: boolean; nextPlayerOverride?: string | null }
   | { type: "SET_RANGE"; maxRange: number }
   | { type: "HEARTBEAT" }
-  | { type: "STATE_SYNC_REQUEST" };
+  | { type: "STATE_SYNC_REQUEST" }
+  | { type: "CHOOSE_ROLL"; chosenRoll: number };
 
 // Host -> Player messages
 export type HostMessage =
