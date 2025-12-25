@@ -15,7 +15,7 @@ interface RollDisplayProps {
   lastMaxRoll?: number | null;
   isRolling?: boolean; // True during Phase 1 (animation), false in Phase 2 (result revealed)
   isMyLoss?: boolean; // True if this player lost, false if someone else lost
-  final10Mode?: boolean; // Whether Final 10 mode is enabled
+  extraVisualEffects?: boolean; // Whether extra visual effects are enabled (Final 10 + 90% drops)
   onAnimationComplete?: () => void;
 }
 
@@ -25,7 +25,7 @@ export const RollDisplay = memo(function RollDisplay({
   lastMaxRoll,
   isRolling = false,
   isMyLoss = false,
-  final10Mode = false,
+  extraVisualEffects = false,
   onAnimationComplete,
 }: RollDisplayProps) {
   const [displayValue, setDisplayValue] = useState<number | null>(lastRoll);
@@ -40,13 +40,13 @@ export const RollDisplay = memo(function RollDisplay({
   const effectiveMax = isRolling ? animationMaxRef.current : currentMax;
 
   // Check if we're in Final 10 mode (enabled AND max roll < 10)
-  const inFinal10 = final10Mode && effectiveMax < 10;
+  const inFinal10 = extraVisualEffects && effectiveMax < 10;
 
   // Calculate intensity based on how close we are to 1
   // Uses exponential scale: closer to 1 = more intense
   // Range: currentMax 9 → ~0.15, currentMax 2 → ~0.95
   const calculateIntensity = (max: number): number => {
-    if (max >= 10 || !final10Mode) return 0;
+    if (max >= 10 || !extraVisualEffects) return 0;
     // Exponential curve for dramatic increase as we approach 1-2
     return Math.pow((10 - max) / 9, 0.6);
   };
@@ -73,7 +73,7 @@ export const RollDisplay = memo(function RollDisplay({
       // Calculate animation speed based on intensity
       // Use the NEW animationMaxRef value to determine if we're in Final 10
       const animationIntensity = calculateIntensity(animationMaxRef.current);
-      const isAnimationFinal10 = final10Mode && animationMaxRef.current < 10;
+      const isAnimationFinal10 = extraVisualEffects && animationMaxRef.current < 10;
       const animationSpeed = isAnimationFinal10 ? 50 + (animationIntensity * 30) : 50;
 
       intervalRef.current = setInterval(() => {
@@ -142,7 +142,7 @@ export const RollDisplay = memo(function RollDisplay({
         intervalRef.current = null;
       }
     };
-  }, [isRolling, lastRoll, currentMax, final10Mode, onAnimationComplete]);
+  }, [isRolling, lastRoll, currentMax, extraVisualEffects, onAnimationComplete]);
 
   // Determine what range to show - during animation use stored max
   const displayMax = isRolling ? animationMaxRef.current : currentMax;
@@ -166,7 +166,7 @@ export const RollDisplay = memo(function RollDisplay({
       {/* Container with red pulsing border in Final 10 mode OR dramatic drop glow */}
       <div
         className={`inline-block rounded-lg transition-all duration-300 ${
-          inFinal10 || showDramaticDrop ? "p-4" : ""
+          inFinal10 || showDramaticDrop ? "px-3 py-2" : ""
         } ${showDramaticDrop ? "relative" : ""}`}
         style={{
           border: showDramaticDrop
@@ -186,16 +186,39 @@ export const RollDisplay = memo(function RollDisplay({
             : "none",
         }}
       >
-        {/* Particle burst effect */}
+        {/* Particle burst effect - like critical hit! */}
         {showDramaticDrop && (
           <>
-            {[...Array(12)].map((_, i) => (
+            {/* Large primary particles */}
+            {[...Array(8)].map((_, i) => (
               <div
-                key={i}
-                className="particle"
+                key={`large-${i}`}
+                className="particle-large"
                 style={{
-                  "--angle": `${i * 30}deg`,
-                  animationDelay: `${i * 0.03}s`,
+                  "--angle": `${i * 45}deg`,
+                  animationDelay: `${i * 0.02}s`,
+                } as React.CSSProperties}
+              />
+            ))}
+            {/* Medium secondary particles */}
+            {[...Array(16)].map((_, i) => (
+              <div
+                key={`medium-${i}`}
+                className="particle-medium"
+                style={{
+                  "--angle": `${i * 22.5}deg`,
+                  animationDelay: `${i * 0.015}s`,
+                } as React.CSSProperties}
+              />
+            ))}
+            {/* Small sparkle particles */}
+            {[...Array(24)].map((_, i) => (
+              <div
+                key={`small-${i}`}
+                className="particle-small"
+                style={{
+                  "--angle": `${i * 15}deg`,
+                  animationDelay: `${i * 0.01}s`,
                 } as React.CSSProperties}
               />
             ))}
@@ -292,16 +315,42 @@ export const RollDisplay = memo(function RollDisplay({
           }
         }
 
-        @keyframes particleBurst {
+        @keyframes particleBurstLarge {
           0% {
             transform: translate(-50%, -50%) rotate(var(--angle)) translateX(0);
             opacity: 1;
             scale: 1;
           }
           100% {
-            transform: translate(-50%, -50%) rotate(var(--angle)) translateX(120px);
+            transform: translate(-50%, -50%) rotate(var(--angle)) translateX(300px);
+            opacity: 0;
+            scale: 0.2;
+          }
+        }
+
+        @keyframes particleBurstMedium {
+          0% {
+            transform: translate(-50%, -50%) rotate(var(--angle)) translateX(0);
+            opacity: 1;
+            scale: 1;
+          }
+          100% {
+            transform: translate(-50%, -50%) rotate(var(--angle)) translateX(240px);
             opacity: 0;
             scale: 0.3;
+          }
+        }
+
+        @keyframes particleBurstSmall {
+          0% {
+            transform: translate(-50%, -50%) rotate(var(--angle)) translateX(0);
+            opacity: 1;
+            scale: 1;
+          }
+          100% {
+            transform: translate(-50%, -50%) rotate(var(--angle)) translateX(180px);
+            opacity: 0;
+            scale: 0.5;
           }
         }
 
@@ -309,16 +358,50 @@ export const RollDisplay = memo(function RollDisplay({
           animation: dramaticShake 0.5s ease-in-out;
         }
 
-        .particle {
+        /* Large primary particles - star shaped with strong glow */
+        .particle-large {
           position: absolute;
           top: 50%;
           left: 50%;
-          width: 12px;
-          height: 12px;
-          background: linear-gradient(135deg, rgb(251, 146, 60), rgb(251, 191, 36));
+          width: 32px;
+          height: 32px;
+          background: linear-gradient(135deg, rgb(251, 191, 36), rgb(251, 146, 60));
+          clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+          animation: particleBurstLarge 1s ease-out forwards;
+          box-shadow:
+            0 0 20px rgba(251, 191, 36, 1),
+            0 0 40px rgba(251, 146, 60, 0.8);
+          filter: brightness(1.5);
+        }
+
+        /* Medium particles - diamond shaped with glow */
+        .particle-medium {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          width: 20px;
+          height: 20px;
+          background: linear-gradient(135deg, rgb(251, 146, 60), rgb(234, 88, 12));
+          transform: rotate(45deg);
+          animation: particleBurstMedium 0.9s ease-out forwards;
+          box-shadow:
+            0 0 15px rgba(251, 146, 60, 1),
+            0 0 30px rgba(251, 146, 60, 0.6);
+        }
+
+        /* Small sparkle particles - circular with trail effect */
+        .particle-small {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          width: 8px;
+          height: 8px;
+          background: rgb(251, 191, 36);
           border-radius: 50%;
-          animation: particleBurst 0.8s ease-out forwards;
-          box-shadow: 0 0 8px rgba(251, 146, 60, 0.8);
+          animation: particleBurstSmall 0.7s ease-out forwards;
+          box-shadow:
+            0 0 10px rgba(251, 191, 36, 1),
+            0 0 20px rgba(251, 191, 36, 0.8);
         }
 
         /* Respect user's reduced motion preference */

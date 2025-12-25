@@ -26,7 +26,7 @@ export function RollSection({
           lastMaxRoll={gameState.lastMaxRoll}
           isRolling={gameState.isRolling}
           isMyLoss={isMyLoss}
-          final10Mode={gameState.final10Mode}
+          extraVisualEffects={gameState.extraVisualEffects}
           onAnimationComplete={onAnimationComplete}
         />
       ) : (

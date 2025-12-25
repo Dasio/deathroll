@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { GameState } from "@/types/game";
 import { initializeSounds } from "@/lib/sounds";
+import { determineRollRange } from "@/lib/utils/rangeUtils";
 
 export interface KeyboardRollParams {
   gameState: GameState;
@@ -13,6 +14,7 @@ export interface KeyboardRollParams {
   coinAbilityState: {
     localRollTwice: boolean;
     localNextPlayerOverride: string | null;
+    localSkipRoll: boolean;
   };
   onCoinStateReset: () => void;
   onSetSessionMaxRoll: (value: number) => void;
@@ -46,10 +48,12 @@ export function useKeyboardRoll(params: KeyboardRollParams): void {
         setIsRolling(true);
         initializeSounds();
 
-        const rangeToUse =
-          canSetRange && customRange && customRange !== gameState.currentMaxRoll
-            ? customRange
-            : undefined;
+        const rangeToUse = determineRollRange(
+          canSetRange,
+          customRange,
+          sessionMaxRoll,
+          gameState.currentMaxRoll
+        );
 
         // Save the chosen range for the session
         if (rangeToUse) {
@@ -77,6 +81,7 @@ export function useKeyboardRoll(params: KeyboardRollParams): void {
     onRoll,
     coinAbilityState.localRollTwice,
     coinAbilityState.localNextPlayerOverride,
+    coinAbilityState.localSkipRoll,
     onCoinStateReset,
     onSetSessionMaxRoll,
     onClearCustomRange,

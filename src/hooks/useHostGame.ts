@@ -24,7 +24,7 @@ import {
   removeTeam,
   assignPlayerToTeam,
   setTeamMode,
-  setFinal10Mode,
+  setExtraVisualEffects,
   setCoinsEnabled,
   setInitialCoins,
   skipDisconnectedPlayer,
@@ -278,7 +278,7 @@ export function useHostGame() {
         // Calculate animation duration and delay Phase 2
         const animationDuration = calculateAnimationDuration(
           stateWithRoll.lastMaxRoll ?? stateWithRoll.currentMaxRoll,
-          stateWithRoll.final10Mode
+          stateWithRoll.extraVisualEffects
         );
 
         setTimeout(() => {
@@ -508,7 +508,7 @@ export function useHostGame() {
     // Calculate animation duration and delay Phase 2
     const animationDuration = calculateAnimationDuration(
       stateWithRoll.lastMaxRoll ?? stateWithRoll.currentMaxRoll,
-      stateWithRoll.final10Mode
+      stateWithRoll.extraVisualEffects
     );
 
     setTimeout(() => {
@@ -786,8 +786,8 @@ export function useHostGame() {
     updateState((prev) => setTeamMode(prev, enabled));
   }, [updateState]);
 
-  const handleSetFinal10Mode = useCallback((enabled: boolean) => {
-    updateState((prev) => setFinal10Mode(prev, enabled));
+  const handleSetExtraVisualEffects = useCallback((enabled: boolean) => {
+    updateState((prev) => setExtraVisualEffects(prev, enabled));
   }, [updateState]);
 
   const handleSetCoinsEnabled = useCallback((enabled: boolean) => {
@@ -835,7 +835,7 @@ export function useHostGame() {
     removeTeam: handleRemoveTeam,
     assignPlayerToTeam: handleAssignPlayerToTeam,
     setTeamMode: handleSetTeamMode,
-    setFinal10Mode: handleSetFinal10Mode,
+    setExtraVisualEffects: handleSetExtraVisualEffects,
     setCoinsEnabled: handleSetCoinsEnabled,
     setInitialCoins: handleSetInitialCoins,
     localChooseRoll: handleLocalChooseRoll,

@@ -91,15 +91,15 @@ export function setTeamMode(state: GameState, enabled: boolean): GameState {
 }
 
 /**
- * Enables or disables Final 10 mode
+ * Enables or disables extra visual effects (Final 10 tension + 90% drop particles)
  * @param state - Current game state
- * @param enabled - Whether Final 10 mode should be enabled
- * @returns Updated game state with Final 10 mode toggled
+ * @param enabled - Whether extra visual effects should be enabled
+ * @returns Updated game state with extra visual effects toggled
  */
-export function setFinal10Mode(state: GameState, enabled: boolean): GameState {
+export function setExtraVisualEffects(state: GameState, enabled: boolean): GameState {
   return {
     ...state,
-    final10Mode: enabled,
+    extraVisualEffects: enabled,
   };
 }
 
@@ -520,16 +520,16 @@ function getNextPlayerIndex(state: GameState): number {
 
 /**
  * Calculates the animation duration based on the max roll value
- * Final 10 mode has slower, more dramatic animations
+ * Extra visual effects mode has slower, more dramatic animations
  *
  * @param maxRoll - The maximum roll value for this animation
- * @param final10ModeEnabled - Whether Final 10 mode is enabled
+ * @param extraVisualEffectsEnabled - Whether extra visual effects are enabled
  * @returns Animation duration in milliseconds
  */
-export function calculateAnimationDuration(maxRoll: number, final10ModeEnabled: boolean): number {
+export function calculateAnimationDuration(maxRoll: number, extraVisualEffectsEnabled: boolean): number {
   const tickCount = 11; // Number of animation ticks (11 iterations before showing result)
 
-  if (final10ModeEnabled && maxRoll < 10) {
+  if (extraVisualEffectsEnabled && maxRoll < 10) {
     // Calculate intensity: closer to 1 = more intense
     const intensity = Math.pow((10 - maxRoll) / 9, 0.6);
     // Base speed: 50ms, slowest: 80ms at max intensity

@@ -34,7 +34,7 @@ export interface GameState {
   players: Player[];
   teams: Team[]; // Team definitions
   teamMode: boolean; // Whether team mode is enabled
-  final10Mode: boolean; // Whether Final 10 mode is enabled (visual effects when max roll < 10)
+  extraVisualEffects: boolean; // Enable extra visual effects (Final 10 tension + 90% drop particles)
   currentPlayerIndex: number;
   currentMaxRoll: number;
   initialMaxRoll: number;
@@ -61,7 +61,7 @@ export function createInitialGameState(): GameState {
     players: [],
     teams: [],
     teamMode: false,
-    final10Mode: true, // Enabled by default for dramatic tension
+    extraVisualEffects: true, // Enabled by default for dramatic tension
     currentPlayerIndex: 0,
     currentMaxRoll: 100,
     initialMaxRoll: 100,

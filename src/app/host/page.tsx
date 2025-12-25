@@ -10,6 +10,7 @@ import { useRangeSelection } from "@/hooks/game/useRangeSelection";
 import { useAnimationState } from "@/hooks/game/useAnimationState";
 import { useLoserNotification } from "@/hooks/game/useLoserNotification";
 import { useKeyboardRoll } from "@/hooks/game/useKeyboardRoll";
+import { determineRollRange } from "@/lib/utils/rangeUtils";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
@@ -18,6 +19,7 @@ import { PlayerList } from "@/components/game/PlayerList";
 import { RollDisplay } from "@/components/game/RollDisplay";
 import { RollHistory } from "@/components/game/RollHistory";
 import { TeamList } from "@/components/game/TeamList";
+import { CoinAbilityControls } from "@/components/game/CoinAbilityControls";
 import { getCurrentPlayer } from "@/lib/game/gameLogic";
 import { initializeSounds } from "@/lib/sounds";
 import { SoundToggle } from "@/components/ui/SoundToggle";
@@ -46,7 +48,7 @@ export default function HostPage() {
     removeTeam,
     assignPlayerToTeam,
     setTeamMode,
-    setFinal10Mode,
+    setExtraVisualEffects,
     setCoinsEnabled,
     setInitialCoins,
     localChooseRoll,
@@ -102,6 +104,7 @@ export default function HostPage() {
     coinAbilityState: {
       localRollTwice: coinAbilityState.localRollTwice,
       localNextPlayerOverride: coinAbilityState.localNextPlayerOverride,
+      localSkipRoll: coinAbilityState.localSkipRoll,
     },
     onCoinStateReset: coinAbilityState.resetCoinState,
     onSetSessionMaxRoll: rangeState.setSessionMaxRoll,
@@ -271,13 +274,13 @@ export default function HostPage() {
             <div className="flex items-center gap-3">
               <input
                 type="checkbox"
-                id="final10Mode"
-                checked={gameState.final10Mode}
-                onChange={(e) => setFinal10Mode(e.target.checked)}
+                id="extraVisualEffects"
+                checked={gameState.extraVisualEffects}
+                onChange={(e) => setExtraVisualEffects(e.target.checked)}
                 className="w-4 h-4 rounded border-[var(--border)] bg-[var(--background)] text-[var(--accent)] focus:ring-[var(--accent)]"
               />
-              <label htmlFor="final10Mode" className="text-[var(--muted)]">
-                Final 10 Mode (visual effects when max roll drops below 10)
+              <label htmlFor="extraVisualEffects" className="text-[var(--muted)]">
+                Extra Visual Effects
               </label>
             </div>
 
@@ -517,7 +520,7 @@ export default function HostPage() {
             lastRoll={gameState.lastRoll}
             lastMaxRoll={gameState.lastMaxRoll}
             isRolling={gameState.isRolling}
-            final10Mode={gameState.final10Mode}
+            extraVisualEffects={gameState.extraVisualEffects}
             onAnimationComplete={animationState.handleAnimationComplete}
           />
         ) : (
@@ -570,97 +573,18 @@ export default function HostPage() {
 
             {/* Coin ability buttons for local players */}
             {currentIsLocal && gameState.coinsEnabled && currentPlayer && !gameState.rollTwiceResults && (
-              <div className="flex flex-col gap-2 mb-4">
-                <div className="flex gap-2 justify-center flex-wrap">
-                  {/* Choose Next Player Button - only show with 3+ players */}
-                  {(() => {
-                    const activePlayers = gameState.players.filter((p) => !p.isSpectator && p.isConnected);
-                    if (activePlayers.length <= 2) return null; // Hide with 2 or fewer players
-
-                    const myPlayer = gameState.players.find((p) => p.id === currentPlayer.id);
-                    const canAfford = myPlayer && myPlayer.coins >= 1;
-                    const isActive = coinAbilityState.localNextPlayerOverride !== null;
-
-                    return (
-                      <Button
-                        variant={isActive ? "primary" : "secondary"}
-                        size="sm"
-                        onClick={() => {
-                          if (isActive) {
-                            // Cancel
-                            coinAbilityState.setLocalNextPlayerOverride(null);
-                            coinAbilityState.setShowPlayerSelector(false);
-                          } else {
-                            // Show selector
-                            coinAbilityState.setShowPlayerSelector(!coinAbilityState.showPlayerSelector);
-                          }
-                        }}
-                        disabled={!isActive && !canAfford}
-                      >
-                        {isActive ? "✓ Next Player Set (click to cancel)" : `🎯 Choose Next (1 🪙)`}
-                      </Button>
-                    );
-                  })()}
-
-                  {/* Roll Twice Button */}
-                  {(() => {
-                    const myPlayer = gameState.players.find((p) => p.id === currentPlayer.id);
-                    const canAfford = myPlayer && myPlayer.coins >= 1;
-
-                    return (
-                      <Button
-                        variant={coinAbilityState.localRollTwice ? "primary" : "secondary"}
-                        size="sm"
-                        onClick={() => coinAbilityState.setLocalRollTwice(!coinAbilityState.localRollTwice)}
-                        disabled={!coinAbilityState.localRollTwice && !canAfford}
-                      >
-                        {coinAbilityState.localRollTwice ? "✓ Roll Twice (click to cancel)" : `🎲 Roll Twice (1 🪙)`}
-                      </Button>
-                    );
-                  })()}
-
-                  {/* Skip Roll Button */}
-                  {(() => {
-                    const myPlayer = gameState.players.find((p) => p.id === currentPlayer.id);
-                    const canAffordSkipRoll = myPlayer && myPlayer.coins >= 2;
-
-                    return (
-                      <Button
-                        variant={coinAbilityState.localSkipRoll ? "primary" : "secondary"}
-                        size="sm"
-                        onClick={() => coinAbilityState.setLocalSkipRoll(!coinAbilityState.localSkipRoll)}
-                        disabled={!coinAbilityState.localSkipRoll && !canAffordSkipRoll}
-                      >
-                        {coinAbilityState.localSkipRoll ? "✓ Skip Roll (click to cancel)" : `⏭️ Skip Roll (2 🪙)`}
-                      </Button>
-                    );
-                  })()}
-                </div>
-
-                {/* Player Selector */}
-                {coinAbilityState.showPlayerSelector && (
-                  <div className="p-3 bg-[var(--background)] rounded border">
-                    <div className="text-sm font-semibold mb-2">Choose who goes next:</div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {gameState.players
-                        .filter((p) => p.id !== currentPlayer.id && !p.isSpectator && p.isConnected)
-                        .map((player) => (
-                          <Button
-                            key={player.id}
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => {
-                              coinAbilityState.setLocalNextPlayerOverride(player.id);
-                              coinAbilityState.setShowPlayerSelector(false);
-                            }}
-                          >
-                            {player.emoji} {player.name}
-                          </Button>
-                        ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <CoinAbilityControls
+                gameState={gameState}
+                currentPlayerId={currentPlayer.id}
+                localRollTwice={coinAbilityState.localRollTwice}
+                setLocalRollTwice={coinAbilityState.setLocalRollTwice}
+                localNextPlayerOverride={coinAbilityState.localNextPlayerOverride}
+                setLocalNextPlayerOverride={coinAbilityState.setLocalNextPlayerOverride}
+                localSkipRoll={coinAbilityState.localSkipRoll}
+                setLocalSkipRoll={coinAbilityState.setLocalSkipRoll}
+                showPlayerSelector={coinAbilityState.showPlayerSelector}
+                setShowPlayerSelector={coinAbilityState.setShowPlayerSelector}
+              />
             )}
 
             {currentIsLocal && !gameState.rollTwiceResults && (
@@ -669,9 +593,12 @@ export default function HostPage() {
                   size="lg"
                   onClick={() => {
                     initializeSounds();
-                    const rangeToUse = canSetRange && rangeState.customRange && rangeState.customRange !== gameState.currentMaxRoll
-                      ? rangeState.customRange
-                      : undefined;
+                    const rangeToUse = determineRollRange(
+                      canSetRange,
+                      rangeState.customRange,
+                      rangeState.sessionMaxRoll,
+                      gameState.currentMaxRoll
+                    );
                     // Save the chosen range for the session
                     if (rangeToUse) {
                       rangeState.setSessionMaxRoll(rangeToUse);
@@ -686,7 +613,7 @@ export default function HostPage() {
                 >
                   {coinAbilityState.localSkipRoll
                     ? "SKIP ROLL"
-                    : `ROLL (1-${(canSetRange && rangeState.customRange ? rangeState.customRange : (animationState.animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})`
+                    : `ROLL (1-${(canSetRange && rangeState.customRange ? rangeState.customRange : canSetRange && rangeState.sessionMaxRoll ? rangeState.sessionMaxRoll : (animationState.animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})`
                   }
                 </Button>
                 {!isMobile && (
