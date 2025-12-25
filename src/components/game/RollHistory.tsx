@@ -35,10 +35,10 @@ export function RollHistory({ history, maxItems = 10 }: RollHistoryProps) {
               {entry.playerName}
             </span>
             <span>
-              <span className="text-[var(--muted)]">1-{entry.maxRange}</span>
+              <span className="text-[var(--muted)]">1-{entry.maxRange.toLocaleString()}</span>
               <span className="mx-2">→</span>
               <span className={`font-bold ${entry.result === 1 ? "text-[var(--danger)]" : ""}`}>
-                {entry.result}
+                {entry.result.toLocaleString()}
               </span>
             </span>
           </li>
