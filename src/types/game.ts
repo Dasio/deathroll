@@ -75,7 +75,7 @@ export function createInitialGameState(): GameState {
     roundNumber: 1,
     // Strategic coin system
     coinsEnabled: false, // Disabled by default
-    initialCoins: 3, // Default 3 coins per player
+    initialCoins: 1, // Default 1 coin per player
     maxCoins: 5, // Maximum 5 coins
     rollTwicePlayerId: null,
     rollTwiceResults: null,

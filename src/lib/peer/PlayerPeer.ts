@@ -271,8 +271,8 @@ export class PlayerPeer {
     }
   }
 
-  requestRoll(overrideRange?: number | null, rollTwice?: boolean, nextPlayerOverride?: string | null) {
-    this.sendToHost({ type: "ROLL_REQUEST", overrideRange, rollTwice, nextPlayerOverride });
+  requestRoll(overrideRange?: number | null, rollTwice?: boolean, nextPlayerOverride?: string | null, skipRoll?: boolean) {
+    this.sendToHost({ type: "ROLL_REQUEST", overrideRange, rollTwice, nextPlayerOverride, skipRoll });
   }
 
   setRange(maxRange: number) {

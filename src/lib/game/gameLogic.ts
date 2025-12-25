@@ -363,6 +363,32 @@ export function clearRollTwice(state: GameState): GameState {
 }
 
 /**
+ * Activates "Skip Roll" ability for a player (costs 2 coins)
+ * Player skips their turn without rolling, passing to the next player
+ * @param state - Current game state
+ * @param playerId - ID of the player activating skip roll
+ * @returns Updated game state with turn skipped, or null if player can't afford
+ */
+export function activateSkipRoll(state: GameState, playerId: string): GameState | null {
+  if (!canAffordAction(state, playerId, 2)) return null;
+
+  const newState = spendCoins(state, playerId, 2);
+  if (!newState) return null;
+
+  // Determine next player (use override if set, otherwise use rotation)
+  const nextPlayerIndex = newState.nextPlayerOverride
+    ? newState.players.findIndex((p) => p.id === newState.nextPlayerOverride)
+    : getNextPlayerIndex(newState);
+
+  // Advance to next player without changing currentMaxRoll
+  return {
+    ...newState,
+    currentPlayerIndex: nextPlayerIndex >= 0 ? nextPlayerIndex : getNextPlayerIndex(newState),
+    nextPlayerOverride: null, // Clear override after using it
+  };
+}
+
+/**
  * Starts a new game with the specified initial max roll value
  * @param state - Current game state
  * @param initialMaxRoll - The starting maximum roll value (typically 100)

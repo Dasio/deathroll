@@ -113,7 +113,7 @@ function PlayContent() {
     customRange: rangeState.customRange,
     sessionMaxRoll: rangeState.sessionMaxRoll,
     onRoll: (rangeOverride) => {
-      requestRoll(rangeOverride, coinAbilityState.localRollTwice, coinAbilityState.localNextPlayerOverride);
+      requestRoll(rangeOverride, coinAbilityState.localRollTwice, coinAbilityState.localNextPlayerOverride, coinAbilityState.localSkipRoll);
     },
     coinAbilityState: {
       localRollTwice: coinAbilityState.localRollTwice,
@@ -496,6 +496,24 @@ function PlayContent() {
                         </Button>
                       );
                     })()}
+
+                    {/* Skip Roll Button */}
+                    {(() => {
+                      const myPlayer = gameState.players.find((p) => p.id === playerId);
+                      const canAffordSkipRoll = myPlayer && myPlayer.coins >= 2;
+
+                      return (
+                        <Button
+                          variant={coinAbilityState.localSkipRoll ? "primary" : "secondary"}
+                          size="sm"
+                          onClick={() => coinAbilityState.setLocalSkipRoll(!coinAbilityState.localSkipRoll)}
+                          disabled={!coinAbilityState.localSkipRoll && !canAffordSkipRoll}
+                          className="text-sm"
+                        >
+                          {coinAbilityState.localSkipRoll ? "✓ Skip Roll (click to cancel)" : `⏭️ Skip Roll (2 🪙)`}
+                        </Button>
+                      );
+                    })()}
                   </div>
 
                   {/* Player Selector for Choose Next Player */}
@@ -559,7 +577,7 @@ function PlayContent() {
                       if (rangeToUse) {
                         rangeState.setSessionMaxRoll(rangeToUse);
                       }
-                      requestRoll(rangeToUse, coinAbilityState.localRollTwice, coinAbilityState.localNextPlayerOverride);
+                      requestRoll(rangeToUse, coinAbilityState.localRollTwice, coinAbilityState.localNextPlayerOverride, coinAbilityState.localSkipRoll);
                       rangeState.setCustomRange(null);
                       // Clear local coin ability state after rolling
                       coinAbilityState.resetCoinState();
@@ -567,7 +585,10 @@ function PlayContent() {
                     disabled={!animationState.animationComplete}
                     className="px-12 py-4 text-xl"
                   >
-                    ROLL (1-{(canSetRange && rangeState.customRange ? rangeState.customRange : (animationState.animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})
+                    {coinAbilityState.localSkipRoll
+                      ? "SKIP ROLL"
+                      : `ROLL (1-${(canSetRange && rangeState.customRange ? rangeState.customRange : (animationState.animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})`
+                    }
                   </Button>
                   {!isMobile && (
                     <div className="text-xs text-[var(--muted)] mt-2">

@@ -30,6 +30,7 @@ import {
   skipDisconnectedPlayer,
   activateRollTwice,
   setNextPlayerOverride,
+  activateSkipRoll,
 } from "@/lib/game/gameLogic";
 import { PlayerMessage } from "@/types/messages";
 import {
@@ -229,6 +230,17 @@ export function useHostGame() {
 
         // Prevent rolling while previous roll is still animating
         if (currentState.isRolling) {
+          break;
+        }
+
+        // Handle skip roll (takes priority over normal roll)
+        if (message.skipRoll) {
+          const newState = activateSkipRoll(currentState, player.id);
+          if (newState) {
+            console.log("[Host] Player skipped roll:", player.name);
+            setGameState(newState);
+            host.broadcastState(newState);
+          }
           break;
         }
 
@@ -438,7 +450,7 @@ export function useHostGame() {
     updateState((prev) => startGame(prev, initialRange));
   }, [updateState]);
 
-  const handleLocalRoll = useCallback((playerId: string, overrideRange?: number | null, rollTwice?: boolean, nextPlayerOverride?: string | null) => {
+  const handleLocalRoll = useCallback((playerId: string, overrideRange?: number | null, rollTwice?: boolean, nextPlayerOverride?: string | null, skipRoll?: boolean) => {
     const host = hostRef.current;
     if (!host) return;
 
@@ -447,6 +459,17 @@ export function useHostGame() {
 
     // Prevent rolling while previous roll is still animating
     if (currentState.isRolling) {
+      return;
+    }
+
+    // Handle skip roll (takes priority over normal roll)
+    if (skipRoll) {
+      const newState = activateSkipRoll(currentState, playerId);
+      if (newState) {
+        console.log("[Host] Local player skipped roll");
+        setGameState(newState);
+        host.broadcastState(newState);
+      }
       return;
     }
 

@@ -5,6 +5,7 @@ import {
   playDiceRollSound,
   playDeathSound,
   playMaxRollSound,
+  playDramaticDropSound,
 } from "@/lib/sounds";
 import { vibrateDeathRoll, vibrateRoundEnded, vibrateMaxRoll } from "@/lib/vibration";
 
@@ -30,6 +31,7 @@ export const RollDisplay = memo(function RollDisplay({
   const [displayValue, setDisplayValue] = useState<number | null>(lastRoll);
   const [showDeathRoll, setShowDeathRoll] = useState(false);
   const [showMaxRoll, setShowMaxRoll] = useState(false);
+  const [showDramaticDrop, setShowDramaticDrop] = useState(false);
   const animationMaxRef = useRef(currentMax);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -66,6 +68,7 @@ export const RollDisplay = memo(function RollDisplay({
       animationMaxRef.current = currentMax;
       setShowDeathRoll(false);
       setShowMaxRoll(false);
+      setShowDramaticDrop(false);
 
       // Calculate animation speed based on intensity
       // Use the NEW animationMaxRef value to determine if we're in Final 10
@@ -110,6 +113,22 @@ export const RollDisplay = memo(function RollDisplay({
         playMaxRollSound();
       }
 
+      // Check for dramatic drop (90%+ drop in range)
+      // Roll must be ≤10% of previous max (and not a death roll)
+      if (lastRoll > 1 && rollMax > 10) {
+        const dropPercentage = lastRoll / rollMax;
+        if (dropPercentage <= 0.1) {
+          // 90%+ drop detected!
+          setShowDramaticDrop(true);
+          playDramaticDropSound();
+
+          // Clear the effect after animation completes
+          setTimeout(() => {
+            setShowDramaticDrop(false);
+          }, 1500);
+        }
+      }
+
       // Notify parent animation is complete
       onAnimationComplete?.();
     }
@@ -135,7 +154,7 @@ export const RollDisplay = memo(function RollDisplay({
   const pulseSpeed = inFinal10 ? 1 - (intensity * 0.4) : 1; // 1s → 0.6s (faster pulse)
 
   return (
-    <div className="text-center py-8">
+    <div className={`text-center py-8 ${showDramaticDrop ? "dramatic-shake" : ""}`}>
       {/* Final 10 indicator - only show when in Final 10 mode */}
       {inFinal10 && (
         <div className="text-xl text-[var(--danger)] font-bold mb-2 animate-pulse">
@@ -144,21 +163,51 @@ export const RollDisplay = memo(function RollDisplay({
       )}
       <div className="text-[var(--muted)] mb-2">Rolling 1-{displayMax.toLocaleString()}</div>
 
-      {/* Container with red pulsing border in Final 10 mode */}
+      {/* Container with red pulsing border in Final 10 mode OR dramatic drop glow */}
       <div
         className={`inline-block rounded-lg transition-all duration-300 ${
-          inFinal10 ? "p-4" : ""
-        }`}
+          inFinal10 || showDramaticDrop ? "p-4" : ""
+        } ${showDramaticDrop ? "relative" : ""}`}
         style={{
-          border: inFinal10 ? `${borderWidth}px solid rgb(239, 68, 68)` : "none",
-          boxShadow: inFinal10 ? `0 0 ${shadowBlur}px rgba(239, 68, 68, ${shadowOpacity})` : "none",
-          animation: inFinal10 ? `borderPulse ${pulseSpeed}s ease-in-out infinite` : "none",
+          border: showDramaticDrop
+            ? "4px solid rgb(251, 146, 60)"
+            : inFinal10
+            ? `${borderWidth}px solid rgb(239, 68, 68)`
+            : "none",
+          boxShadow: showDramaticDrop
+            ? "0 0 40px rgba(251, 146, 60, 0.9), 0 0 80px rgba(251, 146, 60, 0.5)"
+            : inFinal10
+            ? `0 0 ${shadowBlur}px rgba(239, 68, 68, ${shadowOpacity})`
+            : "none",
+          animation: showDramaticDrop
+            ? "dramaticPulse 0.6s ease-out"
+            : inFinal10
+            ? `borderPulse ${pulseSpeed}s ease-in-out infinite`
+            : "none",
         }}
       >
+        {/* Particle burst effect */}
+        {showDramaticDrop && (
+          <>
+            {[...Array(12)].map((_, i) => (
+              <div
+                key={i}
+                className="particle"
+                style={{
+                  "--angle": `${i * 30}deg`,
+                  animationDelay: `${i * 0.03}s`,
+                } as React.CSSProperties}
+              />
+            ))}
+          </>
+        )}
+
         <div
           className={`text-8xl font-bold transition-all duration-200 ${
             isRolling ? "scale-110 text-[var(--accent)]" : ""
-          } ${showDeathRoll ? "text-[var(--danger)]" : ""} ${showMaxRoll ? "text-[var(--success)]" : ""}`}
+          } ${showDeathRoll ? "text-[var(--danger)]" : ""} ${
+            showMaxRoll ? "text-[var(--success)]" : ""
+          } ${showDramaticDrop ? "text-orange-500" : ""}`}
         >
           {displayValue?.toLocaleString() ?? "?"}
         </div>
@@ -175,7 +224,7 @@ export const RollDisplay = memo(function RollDisplay({
         </div>
       )}
 
-      {/* CSS for Final 10 mode animations */}
+      {/* CSS for animations */}
       <style jsx>{`
         @keyframes borderPulse {
           0%, 100% {
@@ -188,10 +237,97 @@ export const RollDisplay = memo(function RollDisplay({
           }
         }
 
+        @keyframes dramaticPulse {
+          0% {
+            transform: scale(1);
+            filter: brightness(1);
+          }
+          15% {
+            transform: scale(1.15);
+            filter: brightness(1.5) drop-shadow(0 0 30px rgba(251, 146, 60, 1));
+          }
+          30% {
+            transform: scale(0.95);
+          }
+          45% {
+            transform: scale(1.05);
+            filter: brightness(1.3);
+          }
+          100% {
+            transform: scale(1);
+            filter: brightness(1);
+          }
+        }
+
+        @keyframes dramaticShake {
+          0%, 100% {
+            transform: translateX(0);
+          }
+          10% {
+            transform: translateX(-8px) translateY(2px);
+          }
+          20% {
+            transform: translateX(8px) translateY(-2px);
+          }
+          30% {
+            transform: translateX(-6px) translateY(1px);
+          }
+          40% {
+            transform: translateX(6px) translateY(-1px);
+          }
+          50% {
+            transform: translateX(-4px) translateY(2px);
+          }
+          60% {
+            transform: translateX(4px) translateY(-2px);
+          }
+          70% {
+            transform: translateX(-2px) translateY(1px);
+          }
+          80% {
+            transform: translateX(2px) translateY(-1px);
+          }
+          90% {
+            transform: translateX(-1px);
+          }
+        }
+
+        @keyframes particleBurst {
+          0% {
+            transform: translate(-50%, -50%) rotate(var(--angle)) translateX(0);
+            opacity: 1;
+            scale: 1;
+          }
+          100% {
+            transform: translate(-50%, -50%) rotate(var(--angle)) translateX(120px);
+            opacity: 0;
+            scale: 0.3;
+          }
+        }
+
+        .dramatic-shake {
+          animation: dramaticShake 0.5s ease-in-out;
+        }
+
+        .particle {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          width: 12px;
+          height: 12px;
+          background: linear-gradient(135deg, rgb(251, 146, 60), rgb(251, 191, 36));
+          border-radius: 50%;
+          animation: particleBurst 0.8s ease-out forwards;
+          box-shadow: 0 0 8px rgba(251, 146, 60, 0.8);
+        }
+
         /* Respect user's reduced motion preference */
         @media (prefers-reduced-motion: reduce) {
           div {
             animation: none !important;
+          }
+          .particle {
+            display: none;
           }
         }
       `}</style>

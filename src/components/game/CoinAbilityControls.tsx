@@ -8,6 +8,8 @@ export interface CoinAbilityControlsProps {
   setLocalRollTwice: (value: boolean) => void;
   localNextPlayerOverride: string | null;
   setLocalNextPlayerOverride: (value: string | null) => void;
+  localSkipRoll: boolean;
+  setLocalSkipRoll: (value: boolean) => void;
   showPlayerSelector: boolean;
   setShowPlayerSelector: (value: boolean) => void;
 }
@@ -19,12 +21,15 @@ export function CoinAbilityControls({
   setLocalRollTwice,
   localNextPlayerOverride,
   setLocalNextPlayerOverride,
+  localSkipRoll,
+  setLocalSkipRoll,
   showPlayerSelector,
   setShowPlayerSelector,
 }: CoinAbilityControlsProps) {
   const activePlayers = gameState.players.filter((p) => !p.isSpectator && p.isConnected);
   const myPlayer = gameState.players.find((p) => p.id === currentPlayerId);
   const canAfford = myPlayer && myPlayer.coins >= 1;
+  const canAffordSkipRoll = myPlayer && myPlayer.coins >= 2;
   const isChooseNextActive = localNextPlayerOverride !== null;
   const hasChoice = activePlayers.length > 2;
 
@@ -62,6 +67,17 @@ export function CoinAbilityControls({
           className="text-sm"
         >
           {localRollTwice ? "✓ Roll Twice (click to cancel)" : `🎲 Roll Twice (1 🪙)`}
+        </Button>
+
+        {/* Skip Roll Button */}
+        <Button
+          variant={localSkipRoll ? "primary" : "secondary"}
+          size="sm"
+          onClick={() => setLocalSkipRoll(!localSkipRoll)}
+          disabled={!localSkipRoll && !canAffordSkipRoll}
+          className="text-sm"
+        >
+          {localSkipRoll ? "✓ Skip Roll (click to cancel)" : `⏭️ Skip Roll (2 🪙)`}
         </Button>
       </div>
 

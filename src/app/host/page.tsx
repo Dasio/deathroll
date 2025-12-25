@@ -94,7 +94,8 @@ export default function HostPage() {
           currentPlayer.id,
           rangeOverride,
           coinAbilityState.localRollTwice,
-          coinAbilityState.localNextPlayerOverride
+          coinAbilityState.localNextPlayerOverride,
+          coinAbilityState.localSkipRoll
         );
       }
     },
@@ -270,19 +271,6 @@ export default function HostPage() {
             <div className="flex items-center gap-3">
               <input
                 type="checkbox"
-                id="teamMode"
-                checked={gameState.teamMode}
-                onChange={(e) => setTeamMode(e.target.checked)}
-                className="w-4 h-4 rounded border-[var(--border)] bg-[var(--background)] text-[var(--accent)] focus:ring-[var(--accent)]"
-              />
-              <label htmlFor="teamMode" className="text-[var(--muted)]">
-                Team Mode (allow any team combination: 1v2v3, 2v2, etc.)
-              </label>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <input
-                type="checkbox"
                 id="final10Mode"
                 checked={gameState.final10Mode}
                 onChange={(e) => setFinal10Mode(e.target.checked)}
@@ -302,7 +290,7 @@ export default function HostPage() {
                 className="w-4 h-4 rounded border-[var(--border)] bg-[var(--background)] text-[var(--accent)] focus:ring-[var(--accent)]"
               />
               <label htmlFor="coinsMode" className="text-[var(--muted)]">
-                Strategic Coins (spend coins to reroll or choose next player)
+                Strategic Coins (unlock special abilities using coins)
               </label>
             </div>
 
@@ -318,10 +306,23 @@ export default function HostPage() {
                   className="w-20 text-center"
                 />
                 <span className="text-xs text-[var(--muted)]">
-                  1 coin = Reroll or Choose Next Player
+                  Roll Twice (1 🪙) • Choose Next (1 🪙) • Skip Roll (2 🪙)
                 </span>
               </div>
             )}
+
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="teamMode"
+                checked={gameState.teamMode}
+                onChange={(e) => setTeamMode(e.target.checked)}
+                className="w-4 h-4 rounded border-[var(--border)] bg-[var(--background)] text-[var(--accent)] focus:ring-[var(--accent)]"
+              />
+              <label htmlFor="teamMode" className="text-[var(--muted)]">
+                Team Mode (allow any team combination: 1v2v3, 2v2, etc.)
+              </label>
+            </div>
           </div>
         </Card>
 
@@ -617,6 +618,23 @@ export default function HostPage() {
                       </Button>
                     );
                   })()}
+
+                  {/* Skip Roll Button */}
+                  {(() => {
+                    const myPlayer = gameState.players.find((p) => p.id === currentPlayer.id);
+                    const canAffordSkipRoll = myPlayer && myPlayer.coins >= 2;
+
+                    return (
+                      <Button
+                        variant={coinAbilityState.localSkipRoll ? "primary" : "secondary"}
+                        size="sm"
+                        onClick={() => coinAbilityState.setLocalSkipRoll(!coinAbilityState.localSkipRoll)}
+                        disabled={!coinAbilityState.localSkipRoll && !canAffordSkipRoll}
+                      >
+                        {coinAbilityState.localSkipRoll ? "✓ Skip Roll (click to cancel)" : `⏭️ Skip Roll (2 🪙)`}
+                      </Button>
+                    );
+                  })()}
                 </div>
 
                 {/* Player Selector */}
@@ -658,7 +676,7 @@ export default function HostPage() {
                     if (rangeToUse) {
                       rangeState.setSessionMaxRoll(rangeToUse);
                     }
-                    localRoll(currentPlayer.id, rangeToUse, coinAbilityState.localRollTwice, coinAbilityState.localNextPlayerOverride);
+                    localRoll(currentPlayer.id, rangeToUse, coinAbilityState.localRollTwice, coinAbilityState.localNextPlayerOverride, coinAbilityState.localSkipRoll);
                     rangeState.setCustomRange(null);
                     // Clear local coin ability state after rolling
                     coinAbilityState.resetCoinState();
@@ -666,7 +684,10 @@ export default function HostPage() {
                   disabled={!animationState.animationComplete}
                   className="px-12"
                 >
-                  ROLL (1-{(canSetRange && rangeState.customRange ? rangeState.customRange : (animationState.animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})
+                  {coinAbilityState.localSkipRoll
+                    ? "SKIP ROLL"
+                    : `ROLL (1-${(canSetRange && rangeState.customRange ? rangeState.customRange : (animationState.animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})`
+                  }
                 </Button>
                 {!isMobile && (
                   <div className="text-xs text-[var(--muted)] mt-2">

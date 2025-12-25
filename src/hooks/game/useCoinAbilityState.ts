@@ -7,6 +7,8 @@ export interface CoinAbilityState {
   setLocalRollTwice: (value: boolean) => void;
   localNextPlayerOverride: string | null;
   setLocalNextPlayerOverride: (value: string | null) => void;
+  localSkipRoll: boolean;
+  setLocalSkipRoll: (value: boolean) => void;
   resetCoinState: () => void;
 }
 
@@ -14,10 +16,12 @@ export function useCoinAbilityState(): CoinAbilityState {
   const [showPlayerSelector, setShowPlayerSelector] = useState(false);
   const [localRollTwice, setLocalRollTwice] = useState(false);
   const [localNextPlayerOverride, setLocalNextPlayerOverride] = useState<string | null>(null);
+  const [localSkipRoll, setLocalSkipRoll] = useState(false);
 
   const resetCoinState = () => {
     setLocalRollTwice(false);
     setLocalNextPlayerOverride(null);
+    setLocalSkipRoll(false);
     setShowPlayerSelector(false);
   };
 
@@ -28,6 +32,8 @@ export function useCoinAbilityState(): CoinAbilityState {
     setLocalRollTwice,
     localNextPlayerOverride,
     setLocalNextPlayerOverride,
+    localSkipRoll,
+    setLocalSkipRoll,
     resetCoinState,
   };
 }

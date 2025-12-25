@@ -153,8 +153,8 @@ export function usePlayerGame() {
     }
   }, [playerId]);
 
-  const requestRoll = useCallback((overrideRange?: number | null, rollTwice?: boolean, nextPlayerOverride?: string | null) => {
-    playerRef.current?.requestRoll(overrideRange, rollTwice, nextPlayerOverride);
+  const requestRoll = useCallback((overrideRange?: number | null, rollTwice?: boolean, nextPlayerOverride?: string | null, skipRoll?: boolean) => {
+    playerRef.current?.requestRoll(overrideRange, rollTwice, nextPlayerOverride, skipRoll);
   }, []);
 
   const setRange = useCallback((maxRange: number) => {

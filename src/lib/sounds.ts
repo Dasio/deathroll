@@ -213,3 +213,70 @@ export function playTurnNotificationSound(): void {
     oscillator.stop(now + offset + duration);
   });
 }
+
+/**
+ * Play a dramatic drop sound (impact with whoosh)
+ * Exciting sound when the range drops by 90%+ (e.g., 100 to 10)
+ */
+export function playDramaticDropSound(): void {
+  if (!isEnabled) return;
+
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  const now = ctx.currentTime;
+  const duration = 0.6;
+
+  // Impact sound - low frequency thump
+  const impactOsc = ctx.createOscillator();
+  const impactGain = ctx.createGain();
+
+  impactOsc.connect(impactGain);
+  impactGain.connect(ctx.destination);
+
+  impactOsc.type = "sine";
+  impactOsc.frequency.setValueAtTime(80, now);
+  impactOsc.frequency.exponentialRampToValueAtTime(40, now + 0.15);
+
+  impactGain.gain.setValueAtTime(0.3, now);
+  impactGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+
+  impactOsc.start(now);
+  impactOsc.stop(now + 0.15);
+
+  // Whoosh sound - sweeping frequency
+  const whooshOsc = ctx.createOscillator();
+  const whooshGain = ctx.createGain();
+
+  whooshOsc.connect(whooshGain);
+  whooshGain.connect(ctx.destination);
+
+  whooshOsc.type = "sawtooth";
+  whooshOsc.frequency.setValueAtTime(1200, now);
+  whooshOsc.frequency.exponentialRampToValueAtTime(300, now + duration);
+
+  whooshGain.gain.setValueAtTime(0, now);
+  whooshGain.gain.linearRampToValueAtTime(0.15, now + 0.05);
+  whooshGain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+
+  whooshOsc.start(now);
+  whooshOsc.stop(now + duration);
+
+  // Sparkle sound - high frequency shimmer
+  const sparkleOsc = ctx.createOscillator();
+  const sparkleGain = ctx.createGain();
+
+  sparkleOsc.connect(sparkleGain);
+  sparkleGain.connect(ctx.destination);
+
+  sparkleOsc.type = "sine";
+  sparkleOsc.frequency.setValueAtTime(2000, now + 0.1);
+  sparkleOsc.frequency.exponentialRampToValueAtTime(3500, now + 0.4);
+
+  sparkleGain.gain.setValueAtTime(0, now + 0.1);
+  sparkleGain.gain.linearRampToValueAtTime(0.08, now + 0.15);
+  sparkleGain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+
+  sparkleOsc.start(now + 0.1);
+  sparkleOsc.stop(now + 0.5);
+}
