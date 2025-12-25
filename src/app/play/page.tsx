@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { usePlayerGame } from "@/hooks/usePlayerGame";
+import { useWakeLock } from "@/hooks/useWakeLock";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
@@ -29,21 +30,28 @@ function PlayContent() {
     kicked,
     savedSession,
     isSpectator,
+    networkQuality,
+    latency,
+    reconnectionState,
     joinRoom,
     requestRoll,
     setRange,
     disconnect,
+    manualReconnect,
     reconnectWithSaved,
     discardSavedSession,
     isMyTurn,
     didIJustLose,
   } = usePlayerGame();
 
+  const { isSupported: wakeLockSupported, isActive: wakeLockActive, requestWakeLock, releaseWakeLock } = useWakeLock();
+
   const [roomCode, setRoomCode] = useState(roomCodeParam || savedSession?.roomCode || "");
   const [playerName, setPlayerName] = useState(savedSession?.playerName || "");
   const [hasJoined, setHasJoined] = useState(false);
   const [joinAsSpectator, setJoinAsSpectator] = useState(false);
   const [customRange, setCustomRange] = useState<number | null>(null);
+  const [sessionMaxRoll, setSessionMaxRoll] = useState<number | null>(null);
   const [showLoserNotification, setShowLoserNotification] = useState(false);
   const [notificationLoserId, setNotificationLoserId] = useState<string | null>(null);
   const previousMyTurnRef = useRef(false);
@@ -66,8 +74,18 @@ function PlayContent() {
   }, [gameState.lastLoserId]);
 
   useEffect(() => {
-    return () => disconnect();
-  }, []);
+    return () => {
+      disconnect();
+      releaseWakeLock();
+    };
+  }, [disconnect, releaseWakeLock]);
+
+  // Request wake lock when game starts playing
+  useEffect(() => {
+    if (gameState.phase === "playing" && wakeLockSupported && !isSpectator) {
+      requestWakeLock();
+    }
+  }, [gameState.phase, wakeLockSupported, isSpectator, requestWakeLock]);
 
   // Compute derived state
   const currentPlayer = getCurrentPlayer(gameState);
@@ -128,6 +146,10 @@ function PlayContent() {
         const rangeToUse = canSetRange && customRange && customRange !== gameState.currentMaxRoll
           ? customRange
           : undefined;
+        // Save the chosen range for the session
+        if (rangeToUse) {
+          setSessionMaxRoll(rangeToUse);
+        }
         requestRoll(rangeToUse);
         setCustomRange(null);
         setTimeout(() => setIsRolling(false), 500);
@@ -275,15 +297,55 @@ function PlayContent() {
     );
   }
 
+  // Reconnecting
+  if (status === "reconnecting") {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-4">
+        <Card className="text-center max-w-md">
+          <LoadingSpinner size="lg" />
+          <div className="text-xl mt-4 mb-2">Reconnecting...</div>
+          <p className="text-sm text-[var(--muted)] mb-4">
+            Attempt {reconnectionState.attempt} of {reconnectionState.maxAttempts}
+          </p>
+          {networkQuality === "offline" && (
+            <p className="text-sm text-[var(--danger)] mb-4">
+              ⚠️ No internet connection detected
+            </p>
+          )}
+          <div className="space-y-3">
+            <Button onClick={manualReconnect} variant="secondary" className="w-full">
+              Retry Now
+            </Button>
+            <Link href="/">
+              <Button variant="secondary" className="w-full">
+                Back to Home
+              </Button>
+            </Link>
+          </div>
+        </Card>
+      </main>
+    );
+  }
+
   // Connection closed
   if (status === "closed") {
     return (
       <main className="min-h-screen flex items-center justify-center p-4">
-        <Card className="text-center">
+        <Card className="text-center max-w-md">
           <div className="text-[var(--muted)] mb-4">Connection closed</div>
-          <Link href="/">
-            <Button>Back to Home</Button>
-          </Link>
+          <p className="text-sm text-[var(--muted)] mb-4">
+            The connection to the game was lost.
+          </p>
+          <div className="space-y-3">
+            <Button onClick={manualReconnect} className="w-full">
+              Try to Reconnect
+            </Button>
+            <Link href="/">
+              <Button variant="secondary" className="w-full">
+                Back to Home
+              </Button>
+            </Link>
+          </div>
         </Card>
       </main>
     );
@@ -341,6 +403,11 @@ function PlayContent() {
             {myPlayer && !isSpectator && <span>Your losses: {myPlayer.losses}</span>}
             {isSpectator && <span className="text-[var(--accent)]">👁️ Spectating</span>}
           </div>
+          {wakeLockActive && (
+            <div className="text-xs text-[var(--success)] mt-1" title="Screen will stay on during gameplay">
+              ☀️ Screen kept awake
+            </div>
+          )}
         </div>
         <Link href="/stats" className="text-[var(--accent)] hover:underline text-sm mt-2">
           Stats
@@ -393,7 +460,7 @@ function PlayContent() {
                   <Input
                     type="number"
                     min={2}
-                    value={customRange ?? gameState.currentMaxRoll}
+                    value={customRange ?? sessionMaxRoll ?? gameState.currentMaxRoll}
                     onChange={(e) => setCustomRange(Number(e.target.value))}
                     className="w-40 text-center"
                   />
@@ -408,6 +475,10 @@ function PlayContent() {
                     const rangeToUse = canSetRange && customRange && customRange !== gameState.currentMaxRoll
                       ? customRange
                       : undefined;
+                    // Save the chosen range for the session
+                    if (rangeToUse) {
+                      setSessionMaxRoll(rangeToUse);
+                    }
                     requestRoll(rangeToUse);
                     setCustomRange(null);
                   }}

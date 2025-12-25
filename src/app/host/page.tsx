@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useHostGame } from "@/hooks/useHostGame";
+import { useWakeLock } from "@/hooks/useWakeLock";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
@@ -42,9 +43,12 @@ export default function HostPage() {
     setFinal10Mode,
   } = useHostGame();
 
+  const { isSupported: wakeLockSupported, isActive: wakeLockActive, requestWakeLock, releaseWakeLock } = useWakeLock();
+
   const [newPlayerName, setNewPlayerName] = useState("");
   const [initialRange, setInitialRange] = useState(100);
   const [customRange, setCustomRange] = useState<number | null>(null);
+  const [sessionMaxRoll, setSessionMaxRoll] = useState<number | null>(null);
   const [showLoserNotification, setShowLoserNotification] = useState(false);
   const [notificationLoserId, setNotificationLoserId] = useState<string | null>(null);
   const [isRolling, setIsRolling] = useState(false);
@@ -106,6 +110,10 @@ export default function HostPage() {
         const rangeToUse = canSetRange && customRange && customRange !== gameState.currentMaxRoll
           ? customRange
           : undefined;
+        // Save the chosen range for the session
+        if (rangeToUse) {
+          setSessionMaxRoll(rangeToUse);
+        }
         localRoll(currentPlayer.id, rangeToUse);
         setCustomRange(null);
         setTimeout(() => setIsRolling(false), 500);
@@ -124,8 +132,16 @@ export default function HostPage() {
     return () => {
       mounted = false;
       disconnect();
+      releaseWakeLock();
     };
-  }, []);
+  }, [createRoom, disconnect, releaseWakeLock]);
+
+  // Request wake lock when game starts playing
+  useEffect(() => {
+    if (gameState.phase === "playing" && wakeLockSupported) {
+      requestWakeLock();
+    }
+  }, [gameState.phase, wakeLockSupported, requestWakeLock]);
 
   const handleAddPlayer = () => {
     if (newPlayerName.trim()) {
@@ -439,6 +455,7 @@ export default function HostPage() {
           className="w-full"
           onClick={() => {
             initializeSounds();
+            setSessionMaxRoll(initialRange);
             startGame(initialRange);
           }}
           disabled={gameState.players.length < 1}
@@ -464,6 +481,11 @@ export default function HostPage() {
           {roomCode && <span>Room: {roomCode}</span>}
           <span>Round {gameState.roundNumber}</span>
         </div>
+        {wakeLockActive && (
+          <div className="text-xs text-[var(--success)] mt-1" title="Screen will stay on during gameplay">
+            ☀️ Screen kept awake
+          </div>
+        )}
       </div>
 
       {/* Show who just lost - only after animation completes */}
@@ -500,7 +522,7 @@ export default function HostPage() {
                 <Input
                   type="number"
                   min={2}
-                  value={customRange ?? gameState.currentMaxRoll}
+                  value={customRange ?? sessionMaxRoll ?? gameState.currentMaxRoll}
                   onChange={(e) => setCustomRange(Number(e.target.value))}
                   className="w-40 text-center"
                 />
@@ -516,6 +538,10 @@ export default function HostPage() {
                     const rangeToUse = canSetRange && customRange && customRange !== gameState.currentMaxRoll
                       ? customRange
                       : undefined;
+                    // Save the chosen range for the session
+                    if (rangeToUse) {
+                      setSessionMaxRoll(rangeToUse);
+                    }
                     localRoll(currentPlayer.id, rangeToUse);
                     setCustomRange(null);
                   }}
