@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useHostGame } from "@/hooks/useHostGame";
 import { useWakeLock } from "@/hooks/useWakeLock";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
@@ -44,6 +45,7 @@ export default function HostPage() {
   } = useHostGame();
 
   const { isSupported: wakeLockSupported, isActive: wakeLockActive, requestWakeLock, releaseWakeLock } = useWakeLock();
+  const isMobile = useIsMobile();
 
   const [newPlayerName, setNewPlayerName] = useState("");
   const [initialRange, setInitialRange] = useState(100);
@@ -546,9 +548,11 @@ export default function HostPage() {
                 >
                   ROLL (1-{(canSetRange && customRange ? customRange : (animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})
                 </Button>
-                <div className="text-xs text-[var(--muted)] mt-2">
-                  {animationComplete ? 'Press Space to roll' : 'Dice rolling...'}
-                </div>
+                {!isMobile && (
+                  <div className="text-xs text-[var(--muted)] mt-2">
+                    {animationComplete ? 'Press Space to roll' : 'Dice rolling...'}
+                  </div>
+                )}
               </>
             )}
 

@@ -34,6 +34,10 @@ export const PlayerList = memo(function PlayerList({
   const activePlayers = players.filter((p) => !p.isSpectator);
   const spectators = players.filter((p) => p.isSpectator);
 
+  // Only show local/remote indicator if there are multiple local players (for host perspective)
+  const localPlayerCount = players.filter((p) => p.isLocal).length;
+  const shouldShowLocalRemote = localPlayerCount > 1;
+
   // Sort by losses (ascending) for display (only for active players)
   const sortedPlayers = showScores
     ? [...activePlayers].sort((a, b) => a.losses - b.losses)
@@ -75,10 +79,8 @@ export const PlayerList = memo(function PlayerList({
                 )}
               </span>
               <div className="flex gap-2 text-xs">
-                {player.isLocal ? (
+                {shouldShowLocalRemote && player.isLocal && (
                   <span className="text-purple-400">Local</span>
-                ) : (
-                  <span className="text-[var(--success)]">Remote</span>
                 )}
                 {!player.isConnected && (
                   <span className="text-[var(--danger)] animate-pulse">
@@ -146,10 +148,8 @@ export const PlayerList = memo(function PlayerList({
                       <span className="ml-2 text-sm text-[var(--muted)]">👁️</span>
                     </span>
                     <div className="flex gap-2 text-xs">
-                      {player.isLocal ? (
+                      {shouldShowLocalRemote && player.isLocal && (
                         <span className="text-purple-400">Local</span>
-                      ) : (
-                        <span className="text-[var(--success)]">Remote</span>
                       )}
                       {!player.isConnected && (
                         <span className="text-[var(--danger)] animate-pulse">
