@@ -66,7 +66,7 @@ export function usePlayerGame() {
     };
   }, [status]);
 
-  const joinRoom = useCallback(async (roomCode: string, playerName: string, spectator: boolean = false) => {
+  const joinRoom = useCallback(async (roomCode: string, playerName: string, spectator: boolean = false, existingPlayerId?: string) => {
     // Validate room code
     const roomCodeValidation = roomCodeSchema.safeParse(roomCode);
     if (!roomCodeValidation.success) {
@@ -91,6 +91,11 @@ export function usePlayerGame() {
     // Use validated values
     const validatedRoomCode = roomCodeValidation.data;
     const validatedPlayerName = playerNameValidation.data;
+
+    // If existingPlayerId provided, we're reconnecting
+    if (existingPlayerId) {
+      logger.debug("[Player] Reconnecting with existing playerId:", existingPlayerId);
+    }
 
     const player = new PlayerPeer({
       onStatusChange: setStatus,
@@ -141,12 +146,12 @@ export function usePlayerGame() {
     playerRef.current = player;
 
     try {
-      await player.connect(validatedRoomCode, validatedPlayerName, spectator);
+      await player.connect(validatedRoomCode, validatedPlayerName, spectator, existingPlayerId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to join room");
       setStatus("error");
     }
-  }, []);
+  }, [playerId]);
 
   const requestRoll = useCallback((overrideRange?: number | null) => {
     playerRef.current?.requestRoll(overrideRange);
@@ -177,7 +182,7 @@ export function usePlayerGame() {
 
   const reconnectWithSaved = useCallback(async () => {
     if (!savedSession) return;
-    await joinRoom(savedSession.roomCode, savedSession.playerName);
+    await joinRoom(savedSession.roomCode, savedSession.playerName, false, savedSession.playerId);
   }, [savedSession, joinRoom]);
 
   const isMyTurn = useCallback(() => {

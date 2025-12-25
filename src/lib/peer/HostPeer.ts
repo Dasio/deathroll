@@ -39,10 +39,37 @@ export class HostPeer {
   private connections: Map<string, DataConnection> = new Map();
   private callbacks: HostPeerCallbacks;
   private roomCode: string;
+  private lastHeartbeatTimes: Map<string, number> = new Map();
+  private heartbeatCheckInterval: ReturnType<typeof setInterval> | null = null;
+  private readonly HEARTBEAT_TIMEOUT_MS = 20000; // 20 seconds without heartbeat = disconnected
 
   constructor(roomCode: string, callbacks: HostPeerCallbacks) {
     this.roomCode = roomCode;
     this.callbacks = callbacks;
+    this.startHeartbeatMonitoring();
+  }
+
+  private startHeartbeatMonitoring() {
+    // Check for stale connections every 5 seconds
+    this.heartbeatCheckInterval = setInterval(() => {
+      const now = Date.now();
+      this.lastHeartbeatTimes.forEach((lastTime, peerId) => {
+        if (now - lastTime > this.HEARTBEAT_TIMEOUT_MS) {
+          logger.debug("[Host] Player heartbeat timeout:", peerId);
+          // Remove from tracking and trigger disconnect
+          this.lastHeartbeatTimes.delete(peerId);
+          this.connections.delete(peerId);
+          this.callbacks.onPlayerDisconnect(peerId);
+        }
+      });
+    }, 5000);
+  }
+
+  private stopHeartbeatMonitoring() {
+    if (this.heartbeatCheckInterval) {
+      clearInterval(this.heartbeatCheckInterval);
+      this.heartbeatCheckInterval = null;
+    }
   }
 
   async connect(): Promise<void> {
@@ -90,6 +117,8 @@ export class HostPeer {
 
     conn.on("open", () => {
       logger.debug("[Host] Connection opened:", conn.peer);
+      // Start tracking heartbeat for this connection
+      this.lastHeartbeatTimes.set(conn.peer, Date.now());
     });
 
     conn.on("data", (data) => {
@@ -110,6 +139,7 @@ export class HostPeer {
       logger.debug("[Host] Connection closed:", conn.peer);
       const peerId = conn.peer;
       this.connections.delete(peerId);
+      this.lastHeartbeatTimes.delete(peerId);
       this.callbacks.onPlayerDisconnect(peerId);
     });
 
@@ -169,6 +199,8 @@ export class HostPeer {
         break;
 
       case "HEARTBEAT":
+        // Update last heartbeat time
+        this.lastHeartbeatTimes.set(peerId, Date.now());
         this.sendTo(conn, { type: "HEARTBEAT_ACK" });
         break;
 
@@ -236,8 +268,10 @@ export class HostPeer {
   }
 
   disconnect() {
+    this.stopHeartbeatMonitoring();
     this.connections.forEach((conn) => conn.close());
     this.connections.clear();
+    this.lastHeartbeatTimes.clear();
     this.peer?.destroy();
     this.peer = null;
   }
