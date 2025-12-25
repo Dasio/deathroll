@@ -132,8 +132,8 @@ export class PlayerPeer {
           };
           this.sendToHost(joinMessage);
 
-          this.startHeartbeat();
-          this.startPingMonitoring();
+          // Don't start heartbeat immediately - wait for JOIN_ACCEPTED/RECONNECT_ACCEPTED
+          // This prevents premature disconnection during reconnection
           this.reconnectAttempts = 0; // Reset on successful connection
           this.updateReconnectionState();
           resolve();
@@ -209,6 +209,9 @@ export class PlayerPeer {
       case "JOIN_ACCEPTED":
         this.playerId = message.playerId;
         this.callbacks.onJoinAccepted(message.playerId, message.state);
+        // Start heartbeat after successful join
+        this.startHeartbeat();
+        this.startPingMonitoring();
         break;
 
       case "RECONNECT_ACCEPTED":
@@ -216,6 +219,9 @@ export class PlayerPeer {
         this.callbacks.onJoinAccepted(message.playerId, message.state);
         this.reconnectAttempts = 0; // Reset reconnect attempts on successful reconnection
         this.updateReconnectionState();
+        // Start heartbeat after successful reconnection
+        this.startHeartbeat();
+        this.startPingMonitoring();
         break;
 
       case "JOIN_REJECTED":
@@ -431,11 +437,37 @@ export class PlayerPeer {
   }
 
   public manualReconnect(): void {
-    // Allow user to manually trigger reconnection
+    // Allow user to manually trigger reconnection - attempt immediately without delay
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       this.reconnectAttempts = 0; // Reset attempts
     }
-    this.attemptReconnect();
+
+    // Clear any pending reconnect timeout
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+
+    // Attempt reconnection immediately (without delay)
+    this.reconnectAttempts++;
+    this.callbacks.onStatusChange("reconnecting");
+    this.updateReconnectionState();
+
+    // Clean up old connection
+    this.stopHeartbeat();
+    this.stopPingMonitoring();
+    this.hostConnection?.close();
+    this.hostConnection = null;
+    this.peer?.destroy();
+    this.peer = null;
+
+    // Attempt to reconnect immediately
+    logger.debug(`Manual reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+    this.connect(this.roomCode!, this.playerName!, this.spectator, this.playerId || undefined)
+      .catch((err) => {
+        logger.error("Manual reconnection failed:", err);
+        this.updateReconnectionState();
+      });
   }
 
   disconnect() {
