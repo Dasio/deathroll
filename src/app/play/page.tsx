@@ -78,7 +78,8 @@ function PlayContent() {
       disconnect();
       releaseWakeLock();
     };
-  }, [disconnect, releaseWakeLock]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Request wake lock when game starts playing
   useEffect(() => {
@@ -403,11 +404,6 @@ function PlayContent() {
             {myPlayer && !isSpectator && <span>Your losses: {myPlayer.losses}</span>}
             {isSpectator && <span className="text-[var(--accent)]">👁️ Spectating</span>}
           </div>
-          {wakeLockActive && (
-            <div className="text-xs text-[var(--success)] mt-1" title="Screen will stay on during gameplay">
-              ☀️ Screen kept awake
-            </div>
-          )}
         </div>
         <Link href="/stats" className="text-[var(--accent)] hover:underline text-sm mt-2">
           Stats

@@ -134,7 +134,8 @@ export default function HostPage() {
       disconnect();
       releaseWakeLock();
     };
-  }, [createRoom, disconnect, releaseWakeLock]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Request wake lock when game starts playing
   useEffect(() => {
@@ -481,11 +482,6 @@ export default function HostPage() {
           {roomCode && <span>Room: {roomCode}</span>}
           <span>Round {gameState.roundNumber}</span>
         </div>
-        {wakeLockActive && (
-          <div className="text-xs text-[var(--success)] mt-1" title="Screen will stay on during gameplay">
-            ☀️ Screen kept awake
-          </div>
-        )}
       </div>
 
       {/* Show who just lost - only after animation completes */}
