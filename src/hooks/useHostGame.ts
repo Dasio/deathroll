@@ -98,28 +98,41 @@ export function useHostGame() {
       onPlayerReconnect: (peerId, name, playerId, accept, reject) => {
         const currentState = gameStateRef.current;
 
-        // Look for disconnected player by ID first, then by name
-        let disconnectedPlayer = playerId
-          ? currentState.players.find((p) => p.id === playerId && !p.isConnected && !p.isLocal)
+        // Look for existing player by ID (even if still marked connected - could be stale)
+        let existingPlayer = playerId
+          ? currentState.players.find((p) => p.id === playerId && !p.isLocal)
           : null;
 
-        if (!disconnectedPlayer) {
-          disconnectedPlayer = findDisconnectedPlayerByName(currentState, name);
+        // If not found by ID, look for disconnected player by name
+        if (!existingPlayer) {
+          existingPlayer = findDisconnectedPlayerByName(currentState, name);
         }
 
-        if (disconnectedPlayer) {
-          logger.debug("[Host] Reconnecting player:", disconnectedPlayer.name, disconnectedPlayer.id);
+        // Also check for connected player with same name (might be stale connection)
+        if (!existingPlayer) {
+          existingPlayer = currentState.players.find(
+            (p) => p.name === name && !p.isLocal && p.isConnected
+          );
+          if (existingPlayer) {
+            logger.debug("[Host] Found stale connection for player:", name, "- will reconnect");
+          }
+        }
+
+        if (existingPlayer) {
+          logger.debug("[Host] Reconnecting player:", existingPlayer.name, existingPlayer.id);
           // This is a reconnection
-          accept(disconnectedPlayer.id);
+          accept(existingPlayer.id);
 
           setGameState((prev) => {
-            const newState = reconnectPlayer(prev, disconnectedPlayer!.id, peerId);
-            host.reconnectPlayer(peerId, disconnectedPlayer!.id, newState);
+            // Force disconnect old connection and reconnect with new peerId
+            let newState = setPlayerConnected(prev, existingPlayer!.id, false);
+            newState = reconnectPlayer(newState, existingPlayer!.id, peerId);
+            host.reconnectPlayer(peerId, existingPlayer!.id, newState);
             host.broadcastState(newState);
             return newState;
           });
         } else {
-          logger.debug("[Host] No disconnected player found for reconnection:", name, playerId);
+          logger.debug("[Host] No existing player found for reconnection:", name, playerId);
           // Not a reconnection, proceed as new join
           reject("Not a reconnection");
         }
@@ -528,28 +541,41 @@ export function useHostGame() {
       onPlayerReconnect: (peerId, name, playerId, accept, reject) => {
         const currentState = gameStateRef.current;
 
-        // Look for disconnected player by ID first, then by name
-        let disconnectedPlayer = playerId
-          ? currentState.players.find((p) => p.id === playerId && !p.isConnected && !p.isLocal)
+        // Look for existing player by ID (even if still marked connected - could be stale)
+        let existingPlayer = playerId
+          ? currentState.players.find((p) => p.id === playerId && !p.isLocal)
           : null;
 
-        if (!disconnectedPlayer) {
-          disconnectedPlayer = findDisconnectedPlayerByName(currentState, name);
+        // If not found by ID, look for disconnected player by name
+        if (!existingPlayer) {
+          existingPlayer = findDisconnectedPlayerByName(currentState, name);
         }
 
-        if (disconnectedPlayer) {
-          logger.debug("[Host] Reconnecting player:", disconnectedPlayer.name, disconnectedPlayer.id);
+        // Also check for connected player with same name (might be stale connection)
+        if (!existingPlayer) {
+          existingPlayer = currentState.players.find(
+            (p) => p.name === name && !p.isLocal && p.isConnected
+          );
+          if (existingPlayer) {
+            logger.debug("[Host] Found stale connection for player:", name, "- will reconnect");
+          }
+        }
+
+        if (existingPlayer) {
+          logger.debug("[Host] Reconnecting player:", existingPlayer.name, existingPlayer.id);
           // This is a reconnection
-          accept(disconnectedPlayer.id);
+          accept(existingPlayer.id);
 
           setGameState((prev) => {
-            const newState = reconnectPlayer(prev, disconnectedPlayer!.id, peerId);
-            host.reconnectPlayer(peerId, disconnectedPlayer!.id, newState);
+            // Force disconnect old connection and reconnect with new peerId
+            let newState = setPlayerConnected(prev, existingPlayer!.id, false);
+            newState = reconnectPlayer(newState, existingPlayer!.id, peerId);
+            host.reconnectPlayer(peerId, existingPlayer!.id, newState);
             host.broadcastState(newState);
             return newState;
           });
         } else {
-          logger.debug("[Host] No disconnected player found for reconnection:", name, playerId);
+          logger.debug("[Host] No existing player found for reconnection:", name, playerId);
           // Not a reconnection, proceed as new join
           reject("Not a reconnection");
         }

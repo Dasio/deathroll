@@ -336,9 +336,15 @@ function PlayContent() {
       <main className="min-h-screen flex items-center justify-center p-4">
         <Card className="text-center max-w-md">
           <div className="text-[var(--muted)] mb-4">Connection closed</div>
-          <p className="text-sm text-[var(--muted)] mb-4">
-            The connection to the game was lost.
-          </p>
+          {error ? (
+            <p className="text-sm text-[var(--danger)] mb-4 font-semibold">
+              {error}
+            </p>
+          ) : (
+            <p className="text-sm text-[var(--muted)] mb-4">
+              The connection to the game was lost.
+            </p>
+          )}
           <div className="space-y-3">
             <Button onClick={manualReconnect} className="w-full">
               Try to Reconnect
