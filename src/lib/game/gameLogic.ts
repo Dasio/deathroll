@@ -91,6 +91,19 @@ export function setTeamMode(state: GameState, enabled: boolean): GameState {
 }
 
 /**
+ * Enables or disables Final 10 mode
+ * @param state - Current game state
+ * @param enabled - Whether Final 10 mode should be enabled
+ * @returns Updated game state with Final 10 mode toggled
+ */
+export function setFinal10Mode(state: GameState, enabled: boolean): GameState {
+  return {
+    ...state,
+    final10Mode: enabled,
+  };
+}
+
+/**
  * Gets the team for a given player
  * @param state - Current game state
  * @param playerId - ID of the player
@@ -287,7 +300,135 @@ function getNextPlayerIndex(state: GameState): number {
 }
 
 /**
- * Processes a player's roll and updates the game state
+ * Calculates the animation duration based on the max roll value
+ * Final 10 mode has slower, more dramatic animations
+ *
+ * @param maxRoll - The maximum roll value for this animation
+ * @param final10ModeEnabled - Whether Final 10 mode is enabled
+ * @returns Animation duration in milliseconds
+ */
+export function calculateAnimationDuration(maxRoll: number, final10ModeEnabled: boolean): number {
+  const tickCount = 11; // Number of animation ticks (11 iterations before showing result)
+
+  if (final10ModeEnabled && maxRoll < 10) {
+    // Calculate intensity: closer to 1 = more intense
+    const intensity = Math.pow((10 - maxRoll) / 9, 0.6);
+    // Base speed: 50ms, slowest: 80ms at max intensity
+    const tickDuration = 50 + (intensity * 30);
+    return tickCount * tickDuration;
+  }
+
+  // Standard animation speed
+  return tickCount * 50;
+}
+
+/**
+ * Phase 1: Initiates a roll and signals clients to start animation
+ * This should be called immediately and broadcast to start the animation
+ * The actual roll result is NOT revealed yet - it's returned separately for Phase 2
+ *
+ * @param state - Current game state
+ * @param playerId - ID of the player making the roll
+ * @returns Object with updated state (result hidden) and the roll result for host
+ */
+export function initiateRoll(state: GameState, playerId: string): { state: GameState; rollResult: number | null } {
+  if (state.phase !== "playing") return { state, rollResult: null };
+  if (!isPlayerTurn(state, playerId)) return { state, rollResult: null };
+
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player || player.isSpectator) return { state, rollResult: null };
+
+  const result = generateRoll(state.currentMaxRoll);
+
+  // Store the max before this roll (for detecting max rolls later)
+  const maxBeforeRoll = state.currentMaxRoll;
+
+  // Phase 1: Tell clients "roll is happening" but DON'T reveal the result yet!
+  // Clients will animate with random numbers
+  const newState = {
+    ...state,
+    isRolling: true,              // Signal: animation should start
+    lastMaxRoll: maxBeforeRoll,   // Store for max roll detection later
+    lastRollPlayerId: playerId,   // Who's rolling
+    // lastRoll is NOT set yet! Result hidden from clients!
+  };
+
+  return { state: newState, rollResult: result };
+}
+
+/**
+ * Phase 2: Completes a roll by revealing the result and applying game logic consequences
+ * This should be called after animation delay and broadcast
+ *
+ * @param state - Current game state (isRolling should be true from Phase 1)
+ * @param playerId - ID of the player who rolled
+ * @param rollResult - The actual roll result (kept secret during Phase 1)
+ * @returns Updated game state with result revealed and consequences applied
+ */
+export function completeRoll(state: GameState, playerId: string, rollResult: number): GameState {
+  if (state.phase !== "playing") return state;
+  if (!state.isRolling) return state; // No roll in progress
+
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player || player.isSpectator) return state;
+
+  const result = rollResult;
+
+  // Create roll history entry (add AFTER animation completes to avoid spoiling)
+  const rollEntry: RollEntry = {
+    playerId: player.id,
+    playerName: player.name,
+    playerColor: player.color,
+    playerEmoji: player.emoji,
+    maxRange: state.lastMaxRoll ?? state.currentMaxRoll,
+    result,
+    timestamp: Date.now(),
+  };
+
+  // Player rolled 1 - they lose this round, game continues
+  if (result === 1) {
+    const playerTeam = getPlayerTeam(state, playerId);
+
+    return {
+      ...state,
+      isRolling: false,              // Animation complete, result revealed
+      lastRoll: result,              // NOW reveal the result!
+      lastLoserId: playerId,
+      lastLoserTeamId: playerTeam?.id ?? null,
+      rollHistory: addToRollHistory(state.rollHistory, rollEntry),
+      // Increment losses for this player
+      players: state.players.map((p) =>
+        p.id === playerId ? { ...p, losses: p.losses + 1 } : p
+      ),
+      // In team mode, increment losses for the entire team
+      teams: state.teamMode && playerTeam
+        ? state.teams.map((t) =>
+            t.id === playerTeam.id ? { ...t, losses: t.losses + 1 } : t
+          )
+        : state.teams,
+      // Reset for new round - loser starts next round and chooses range
+      currentMaxRoll: state.initialMaxRoll,
+      roundNumber: state.roundNumber + 1,
+      // Loser stays as current player to start new round
+      // (currentPlayerIndex stays the same)
+    };
+  }
+
+  // Continue game with new max and next player
+  return {
+    ...state,
+    isRolling: false,              // Animation complete, result revealed
+    lastRoll: result,              // NOW reveal the result!
+    currentMaxRoll: result,
+    rollHistory: addToRollHistory(state.rollHistory, rollEntry),
+    currentPlayerIndex: getNextPlayerIndex(state),
+    lastLoserId: null, // Clear last loser when game continues normally
+    lastLoserTeamId: null, // Clear last loser team when game continues normally
+  };
+}
+
+/**
+ * Processes a player's roll and updates the game state (LEGACY - synchronous version)
  *
  * Core game logic:
  * - Generates a random number between 1 and currentMaxRoll (inclusive)
@@ -298,6 +439,7 @@ function getNextPlayerIndex(state: GameState): number {
  * @param state - Current game state
  * @param playerId - ID of the player making the roll
  * @returns Updated game state after processing the roll
+ * @deprecated Use initiateRoll + completeRoll for proper animation timing
  */
 export function processRoll(state: GameState, playerId: string): GameState {
   if (state.phase !== "playing") return state;

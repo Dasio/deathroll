@@ -15,13 +15,16 @@ import {
   reconnectPlayer,
   findDisconnectedPlayerByName,
   startGame,
-  processRoll,
+  initiateRoll,
+  completeRoll,
+  calculateAnimationDuration,
   resetGame,
   isPlayerTurn,
   createTeam,
   removeTeam,
   assignPlayerToTeam,
   setTeamMode,
+  setFinal10Mode,
 } from "@/lib/game/gameLogic";
 import { PlayerMessage } from "@/types/messages";
 import {
@@ -191,68 +194,100 @@ export function useHostGame() {
         if (!player) break;
         if (!isPlayerTurn(currentState, player.id)) break;
 
+        // Prevent rolling while previous roll is still animating
+        if (currentState.isRolling) {
+          break;
+        }
+
         // Apply range override if provided
         if (message.overrideRange != null && currentState.currentMaxRoll === currentState.initialMaxRoll) {
           currentState = { ...currentState, currentMaxRoll: message.overrideRange };
         }
 
-        const newState = processRoll(currentState, player.id);
+        // Phase 1: Initiate roll (starts animation)
+        const { state: stateWithRoll, rollResult } = initiateRoll(currentState, player.id);
+        setGameState(stateWithRoll);
+        host.broadcastState(stateWithRoll);
 
-        // Track roll in statistics
-        if (newState.lastRoll !== null && newState.lastMaxRoll !== null) {
-          trackRoll(player.id, newState.lastRoll, newState.lastMaxRoll);
+        // Track roll in statistics (using rollResult, not stateWithRoll.lastRoll which is null in Phase 1)
+        if (rollResult !== null && stateWithRoll.lastMaxRoll !== null) {
+          trackRoll(player.id, rollResult, stateWithRoll.lastMaxRoll);
         }
 
-        // Track game end if someone lost (rolled a 1)
-        if (newState.lastLoserId) {
-          const loser = newState.players.find((p) => p.id === newState.lastLoserId);
-          const activePlayers = newState.players.filter((p) => !p.isSpectator);
+        // Calculate animation duration and delay Phase 2
+        const animationDuration = calculateAnimationDuration(
+          stateWithRoll.lastMaxRoll ?? stateWithRoll.currentMaxRoll,
+          stateWithRoll.final10Mode
+        );
 
-          if (loser && roundStartTimeRef.current) {
-            const duration = Date.now() - roundStartTimeRef.current;
-            const rollCount = newState.rollHistory.filter(
-              (r) => r.timestamp >= roundStartTimeRef.current!
-            ).length;
+        setTimeout(() => {
+          try {
+            // Phase 2: Complete roll (applies consequences)
+            const finalState = completeRoll(gameStateRef.current, player.id, rollResult!);
 
-            // Calculate deficit overcome (for comeback tracking)
-            const otherPlayersLosses = activePlayers
-              .filter((p) => p.id !== loser.id)
-              .map((p) => p.losses);
-            const minOtherLosses = otherPlayersLosses.length > 0 ? Math.min(...otherPlayersLosses) : 0;
-            const deficitOvercome = calculateDeficitOvercome(loser.losses - 1, minOtherLosses);
+            // Track game end if someone lost (rolled a 1)
+            if (finalState.lastLoserId) {
+            const loser = finalState.players.find((p) => p.id === finalState.lastLoserId);
+            const activePlayers = finalState.players.filter((p) => !p.isSpectator);
 
-            // Track loss for this player
-            trackGameEnd({
-              playerId: loser.id,
-              playerName: loser.name,
-              won: false,
-              rollCount,
-              duration,
-              timestamp: Date.now(),
-            });
+            if (loser && roundStartTimeRef.current) {
+              const duration = Date.now() - roundStartTimeRef.current;
+              const rollCount = finalState.rollHistory.filter(
+                (r) => r.timestamp >= roundStartTimeRef.current!
+              ).length;
 
-            // Track wins for other players
-            activePlayers
-              .filter((p) => p.id !== loser.id)
-              .forEach((p) => {
-                trackGameEnd({
-                  playerId: p.id,
-                  playerName: p.name,
-                  won: true,
-                  rollCount,
-                  duration,
-                  deficitOvercome: p.id === player.id ? deficitOvercome : 0,
-                  timestamp: Date.now(),
-                });
+              // Calculate deficit overcome (for comeback tracking)
+              const otherPlayersLosses = activePlayers
+                .filter((p) => p.id !== loser.id)
+                .map((p) => p.losses);
+              const minOtherLosses = otherPlayersLosses.length > 0 ? Math.min(...otherPlayersLosses) : 0;
+              const deficitOvercome = calculateDeficitOvercome(loser.losses - 1, minOtherLosses);
+
+              // Track loss for this player
+              trackGameEnd({
+                playerId: loser.id,
+                playerName: loser.name,
+                won: false,
+                rollCount,
+                duration,
+                timestamp: Date.now(),
               });
 
-            // Reset round start time for next round
-            roundStartTimeRef.current = Date.now();
-          }
-        }
+              // Track wins for other players
+              activePlayers
+                .filter((p) => p.id !== loser.id)
+                .forEach((p) => {
+                  trackGameEnd({
+                    playerId: p.id,
+                    playerName: p.name,
+                    won: true,
+                    rollCount,
+                    duration,
+                    deficitOvercome: p.id === player.id ? deficitOvercome : 0,
+                    timestamp: Date.now(),
+                  });
+                });
 
-        setGameState(newState);
-        host.broadcastState(newState);
+              // Reset round start time for next round
+              roundStartTimeRef.current = Date.now();
+            }
+          }
+
+            setGameState(finalState);
+            host.broadcastState(finalState);
+
+            // Failsafe: After a small delay, broadcast again to ensure sync
+            // This helps if any client's animation got stuck
+            setTimeout(() => {
+              host.broadcastState(gameStateRef.current);
+            }, 200);
+          } catch (error) {
+            console.error('[Host] Phase 2 failed:', error);
+            // On error, try to recover by broadcasting current state
+            host.broadcastState(gameStateRef.current);
+          }
+        }, animationDuration);
+
         break;
       }
 
@@ -320,71 +355,104 @@ export function useHostGame() {
   }, [updateState]);
 
   const handleLocalRoll = useCallback((playerId: string, overrideRange?: number | null) => {
+    const host = hostRef.current;
+    if (!host) return;
+
     let currentState = gameStateRef.current;
     if (!isPlayerTurn(currentState, playerId)) return;
+
+    // Prevent rolling while previous roll is still animating
+    if (currentState.isRolling) {
+      return;
+    }
 
     // Apply range override if provided (for combined set-range-and-roll)
     if (overrideRange != null && currentState.currentMaxRoll === currentState.initialMaxRoll) {
       currentState = { ...currentState, currentMaxRoll: overrideRange };
     }
 
-    const newState = processRoll(currentState, playerId);
+    // Phase 1: Initiate roll (starts animation)
+    const { state: stateWithRoll, rollResult } = initiateRoll(currentState, playerId);
+    setGameState(stateWithRoll);
+    host.broadcastState(stateWithRoll);
 
-    // Track roll in statistics
-    if (newState.lastRoll !== null && newState.lastMaxRoll !== null) {
-      trackRoll(playerId, newState.lastRoll, newState.lastMaxRoll);
+    // Track roll in statistics (using rollResult, not stateWithRoll.lastRoll which is null in Phase 1)
+    if (rollResult !== null && stateWithRoll.lastMaxRoll !== null) {
+      trackRoll(playerId, rollResult, stateWithRoll.lastMaxRoll);
     }
 
-    // Track game end if someone lost (rolled a 1)
-    if (newState.lastLoserId) {
-      const player = newState.players.find((p) => p.id === newState.lastLoserId);
-      const activePlayers = newState.players.filter((p) => !p.isSpectator);
+    // Calculate animation duration and delay Phase 2
+    const animationDuration = calculateAnimationDuration(
+      stateWithRoll.lastMaxRoll ?? stateWithRoll.currentMaxRoll,
+      stateWithRoll.final10Mode
+    );
 
-      if (player && roundStartTimeRef.current) {
-        const duration = Date.now() - roundStartTimeRef.current;
-        const rollCount = newState.rollHistory.filter(
-          (r) => r.timestamp >= roundStartTimeRef.current!
-        ).length;
+    setTimeout(() => {
+      try {
+        // Phase 2: Complete roll (applies consequences)
+        const finalState = completeRoll(gameStateRef.current, playerId, rollResult!);
 
-        // Calculate deficit overcome (for comeback tracking)
-        const otherPlayersLosses = activePlayers
-          .filter((p) => p.id !== player.id)
-          .map((p) => p.losses);
-        const minOtherLosses = otherPlayersLosses.length > 0 ? Math.min(...otherPlayersLosses) : 0;
-        const deficitOvercome = calculateDeficitOvercome(player.losses - 1, minOtherLosses);
+        // Track game end if someone lost (rolled a 1)
+        if (finalState.lastLoserId) {
+        const player = finalState.players.find((p) => p.id === finalState.lastLoserId);
+        const activePlayers = finalState.players.filter((p) => !p.isSpectator);
 
-        // Track loss for this player
-        trackGameEnd({
-          playerId: player.id,
-          playerName: player.name,
-          won: false,
-          rollCount,
-          duration,
-          timestamp: Date.now(),
-        });
+        if (player && roundStartTimeRef.current) {
+          const duration = Date.now() - roundStartTimeRef.current;
+          const rollCount = finalState.rollHistory.filter(
+            (r) => r.timestamp >= roundStartTimeRef.current!
+          ).length;
 
-        // Track wins for other players
-        activePlayers
-          .filter((p) => p.id !== player.id)
-          .forEach((p) => {
-            trackGameEnd({
-              playerId: p.id,
-              playerName: p.name,
-              won: true,
-              rollCount,
-              duration,
-              deficitOvercome: p.id === playerId ? deficitOvercome : 0,
-              timestamp: Date.now(),
-            });
+          // Calculate deficit overcome (for comeback tracking)
+          const otherPlayersLosses = activePlayers
+            .filter((p) => p.id !== player.id)
+            .map((p) => p.losses);
+          const minOtherLosses = otherPlayersLosses.length > 0 ? Math.min(...otherPlayersLosses) : 0;
+          const deficitOvercome = calculateDeficitOvercome(player.losses - 1, minOtherLosses);
+
+          // Track loss for this player
+          trackGameEnd({
+            playerId: player.id,
+            playerName: player.name,
+            won: false,
+            rollCount,
+            duration,
+            timestamp: Date.now(),
           });
 
-        // Reset round start time for next round
-        roundStartTimeRef.current = Date.now();
-      }
-    }
+          // Track wins for other players
+          activePlayers
+            .filter((p) => p.id !== player.id)
+            .forEach((p) => {
+              trackGameEnd({
+                playerId: p.id,
+                playerName: p.name,
+                won: true,
+                rollCount,
+                duration,
+                deficitOvercome: p.id === playerId ? deficitOvercome : 0,
+                timestamp: Date.now(),
+              });
+            });
 
-    setGameState(newState);
-    hostRef.current?.broadcastState(newState);
+          // Reset round start time for next round
+          roundStartTimeRef.current = Date.now();
+        }
+      }
+
+        setGameState(finalState);
+        host.broadcastState(finalState);
+
+        // Failsafe: After a small delay, broadcast again to ensure sync
+        setTimeout(() => {
+          host.broadcastState(gameStateRef.current);
+        }, 200);
+      } catch (error) {
+        console.error('[Host] Phase 2 failed:', error);
+        // On error, try to recover by broadcasting current state
+        host.broadcastState(gameStateRef.current);
+      }
+    }, animationDuration);
   }, []);
 
   const handleSetRange = useCallback((range: number) => {
@@ -554,6 +622,10 @@ export function useHostGame() {
     updateState((prev) => setTeamMode(prev, enabled));
   }, [updateState]);
 
+  const handleSetFinal10Mode = useCallback((enabled: boolean) => {
+    updateState((prev) => setFinal10Mode(prev, enabled));
+  }, [updateState]);
+
   return {
     roomCode,
     status,
@@ -576,5 +648,6 @@ export function useHostGame() {
     removeTeam: handleRemoveTeam,
     assignPlayerToTeam: handleAssignPlayerToTeam,
     setTeamMode: handleSetTeamMode,
+    setFinal10Mode: handleSetFinal10Mode,
   };
 }

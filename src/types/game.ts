@@ -33,9 +33,11 @@ export interface GameState {
   players: Player[];
   teams: Team[]; // Team definitions
   teamMode: boolean; // Whether team mode is enabled
+  final10Mode: boolean; // Whether Final 10 mode is enabled (visual effects when max roll < 10)
   currentPlayerIndex: number;
   currentMaxRoll: number;
   initialMaxRoll: number;
+  isRolling: boolean; // True during animation (Phase 1), false when result revealed (Phase 2)
   lastRoll: number | null;
   lastMaxRoll: number | null; // Max range before last roll (to detect max rolls)
   lastRollPlayerId: string | null; // Who made the last roll
@@ -51,9 +53,11 @@ export function createInitialGameState(): GameState {
     players: [],
     teams: [],
     teamMode: false,
+    final10Mode: true, // Enabled by default for dramatic tension
     currentPlayerIndex: 0,
     currentMaxRoll: 100,
     initialMaxRoll: 100,
+    isRolling: false,
     lastRoll: null,
     lastMaxRoll: null,
     lastRollPlayerId: null,

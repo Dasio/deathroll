@@ -77,18 +77,33 @@ function PlayContent() {
   const iJustLostAfterAnimation = showLoserNotification && notificationLoserId === playerId;
   const [animationComplete, setAnimationComplete] = useState(true);
 
-  // Track when animation starts
+  // Track when animation starts (use isRolling flag)
   useEffect(() => {
-    if (gameState.lastRoll !== null) {
+    if (gameState.isRolling) {
       setAnimationComplete(false);
     }
-  }, [gameState.lastRoll]);
+  }, [gameState.isRolling]);
 
-  // Mark animation complete callback
-  const handleAnimationCompleteWithFlag = useCallback(() => {
+  // Use ref for latest gameState to avoid callback identity changes during animation
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
+
+  // Stable animation complete handler
+  const handleAnimationCompleteStable = useCallback(() => {
     setAnimationComplete(true);
-    handleAnimationComplete();
-  }, [handleAnimationComplete]);
+    const currentState = gameStateRef.current;
+    if (currentState.lastLoserId) {
+      setNotificationLoserId(currentState.lastLoserId);
+      setShowLoserNotification(true);
+    }
+  }, []);
+
+  // Mark animation complete callback (kept for compatibility)
+  const handleAnimationCompleteWithFlag = useCallback(() => {
+    handleAnimationCompleteStable();
+  }, [handleAnimationCompleteStable]);
 
   // Vibrate and play sound when it becomes my turn (after animation completes)
   const myTurn = isMyTurn();
@@ -105,8 +120,8 @@ function PlayContent() {
     if (gameState.phase !== "playing" || isSpectator) return;
 
     const handleKeyPress = (e: KeyboardEvent) => {
-      // Only handle space or enter when it's my turn
-      if ((e.key === " " || e.key === "Enter") && myTurn && !isRolling) {
+      // Only handle space or enter when it's my turn and animation is complete
+      if ((e.key === " " || e.key === "Enter") && myTurn && !isRolling && animationComplete) {
         e.preventDefault();
         setIsRolling(true);
         initializeSounds();
@@ -121,7 +136,7 @@ function PlayContent() {
 
     window.addEventListener("keydown", handleKeyPress);
     return () => window.removeEventListener("keydown", handleKeyPress);
-  }, [gameState.phase, myTurn, isRolling, canSetRange, customRange, gameState.currentMaxRoll, requestRoll, isSpectator]);
+  }, [gameState.phase, myTurn, isRolling, animationComplete, canSetRange, customRange, gameState.currentMaxRoll, requestRoll, isSpectator]);
 
   const handleJoin = async () => {
     if (roomCode.trim() && playerName.trim()) {
@@ -354,7 +369,9 @@ function PlayContent() {
           currentMax={gameState.currentMaxRoll}
           lastRoll={gameState.lastRoll}
           lastMaxRoll={gameState.lastMaxRoll}
+          isRolling={gameState.isRolling}
           isMyLoss={gameState.lastLoserId === playerId}
+          final10Mode={gameState.final10Mode}
           onAnimationComplete={handleAnimationCompleteWithFlag}
         />
 
@@ -394,11 +411,14 @@ function PlayContent() {
                     requestRoll(rangeToUse);
                     setCustomRange(null);
                   }}
+                  disabled={!animationComplete}
                   className="px-12 py-4 text-xl"
                 >
                   ROLL (1-{(canSetRange && customRange ? customRange : (animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})
                 </Button>
-                <div className="text-xs text-[var(--muted)] mt-2">Press Space to roll</div>
+                <div className="text-xs text-[var(--muted)] mt-2">
+                  {animationComplete ? 'Press Space to roll' : 'Dice rolling...'}
+                </div>
               </>
             </>
           ) : (

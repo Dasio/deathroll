@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useHostGame } from "@/hooks/useHostGame";
 import { Button } from "@/components/ui/Button";
@@ -39,6 +39,7 @@ export default function HostPage() {
     removeTeam,
     assignPlayerToTeam,
     setTeamMode,
+    setFinal10Mode,
   } = useHostGame();
 
   const [newPlayerName, setNewPlayerName] = useState("");
@@ -55,21 +56,29 @@ export default function HostPage() {
 
   const [animationComplete, setAnimationComplete] = useState(true);
 
-  // Track when animation starts
+  // Track when animation starts (use isRolling flag)
   useEffect(() => {
-    if (gameState.lastRoll !== null) {
+    if (gameState.isRolling) {
       setAnimationComplete(false);
     }
-  }, [gameState.lastRoll]);
+  }, [gameState.isRolling]);
+
+  // Use ref for latest gameState to avoid callback identity changes during animation
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
   // Handle animation completion - show loser notification after dice animation
+  // IMPORTANT: No dependencies to keep callback stable during animation!
   const handleAnimationComplete = useCallback(() => {
     setAnimationComplete(true);
-    if (gameState.lastLoserId) {
-      setNotificationLoserId(gameState.lastLoserId);
+    const currentState = gameStateRef.current;
+    if (currentState.lastLoserId) {
+      setNotificationLoserId(currentState.lastLoserId);
       setShowLoserNotification(true);
     }
-  }, [gameState.lastLoserId]);
+  }, []); // Empty deps = stable callback
 
   // Reset notification when a new roll starts (lastLoserId becomes null)
   useEffect(() => {
@@ -89,8 +98,8 @@ export default function HostPage() {
     if (gameState.phase !== "playing") return;
 
     const handleKeyPress = (e: KeyboardEvent) => {
-      // Only handle space or enter when it's a local player's turn
-      if ((e.key === " " || e.key === "Enter") && currentPlayer?.isLocal && !isRolling) {
+      // Only handle space or enter when it's a local player's turn and animation is complete
+      if ((e.key === " " || e.key === "Enter") && currentPlayer?.isLocal && !isRolling && animationComplete) {
         e.preventDefault();
         setIsRolling(true);
         initializeSounds();
@@ -105,7 +114,7 @@ export default function HostPage() {
 
     window.addEventListener("keydown", handleKeyPress);
     return () => window.removeEventListener("keydown", handleKeyPress);
-  }, [gameState.phase, currentPlayer, isRolling, canSetRange, customRange, gameState.currentMaxRoll, localRoll]);
+  }, [gameState.phase, currentPlayer, isRolling, animationComplete, canSetRange, customRange, gameState.currentMaxRoll, localRoll]);
 
   useEffect(() => {
     let mounted = true;
@@ -267,6 +276,19 @@ export default function HostPage() {
               />
               <label htmlFor="teamMode" className="text-[var(--muted)]">
                 Team Mode (allow any team combination: 1v2v3, 2v2, etc.)
+              </label>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="final10Mode"
+                checked={gameState.final10Mode}
+                onChange={(e) => setFinal10Mode(e.target.checked)}
+                className="w-4 h-4 rounded border-[var(--border)] bg-[var(--background)] text-[var(--accent)] focus:ring-[var(--accent)]"
+              />
+              <label htmlFor="final10Mode" className="text-[var(--muted)]">
+                Final 10 Mode (visual effects when max roll drops below 10)
               </label>
             </div>
           </div>
@@ -460,6 +482,8 @@ export default function HostPage() {
           currentMax={gameState.currentMaxRoll}
           lastRoll={gameState.lastRoll}
           lastMaxRoll={gameState.lastMaxRoll}
+          isRolling={gameState.isRolling}
+          final10Mode={gameState.final10Mode}
           onAnimationComplete={handleAnimationComplete}
         />
 
@@ -495,11 +519,14 @@ export default function HostPage() {
                     localRoll(currentPlayer.id, rangeToUse);
                     setCustomRange(null);
                   }}
+                  disabled={!animationComplete}
                   className="px-12"
                 >
                   ROLL (1-{(canSetRange && customRange ? customRange : (animationComplete ? gameState.currentMaxRoll : (gameState.lastMaxRoll ?? gameState.currentMaxRoll))).toLocaleString()})
                 </Button>
-                <div className="text-xs text-[var(--muted)] mt-2">Press Space to roll</div>
+                <div className="text-xs text-[var(--muted)] mt-2">
+                  {animationComplete ? 'Press Space to roll' : 'Dice rolling...'}
+                </div>
               </>
             )}
 
