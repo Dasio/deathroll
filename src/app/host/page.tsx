@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useHostGame } from "@/hooks/useHostGame";
 import { useWakeLock } from "@/hooks/useWakeLock";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useCoinAbilityState } from "@/hooks/game/useCoinAbilityState";
 import { useRangeSelection } from "@/hooks/game/useRangeSelection";
 import { useAnimationState } from "@/hooks/game/useAnimationState";
@@ -26,6 +27,9 @@ import { SoundToggle } from "@/components/ui/SoundToggle";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
 export default function HostPage() {
+  const isOnline = useOnlineStatus();
+  const [localMode, setLocalMode] = useState(!isOnline); // Auto-enable if offline
+
   const {
     roomCode,
     status,
@@ -52,13 +56,20 @@ export default function HostPage() {
     setCoinsEnabled,
     setInitialCoins,
     localChooseRoll,
-  } = useHostGame();
+  } = useHostGame({ localMode });
 
   const { isSupported: wakeLockSupported, isActive: wakeLockActive, requestWakeLock, releaseWakeLock } = useWakeLock();
   const isMobile = useIsMobile();
 
   const [newPlayerName, setNewPlayerName] = useState("");
   const [initialRange, setInitialRange] = useState(100);
+
+  // Auto-enable local mode when offline
+  useEffect(() => {
+    if (!isOnline && !localMode) {
+      setLocalMode(true);
+    }
+  }, [isOnline, localMode]);
 
   // Team mode state
   const [newTeamName, setNewTeamName] = useState("");
@@ -221,9 +232,22 @@ export default function HostPage() {
           </Link>
         </div>
 
-        {roomCode && (
+        {!localMode && roomCode && (
           <Card className="mb-6">
             <RoomCode code={roomCode} playerCount={gameState.players.length} />
+          </Card>
+        )}
+
+        {localMode && (
+          <Card className="mb-6">
+            <div className="text-center">
+              <div className="text-lg font-bold text-[var(--accent)] mb-2">
+                📴 Local Mode
+              </div>
+              <p className="text-sm text-[var(--muted)]">
+                Playing offline - all players on this device
+              </p>
+            </div>
           </Card>
         )}
 
@@ -260,6 +284,21 @@ export default function HostPage() {
         <Card className="mb-6">
           <h2 className="text-lg font-semibold mb-4">Game Settings</h2>
           <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="localMode"
+                checked={localMode}
+                onChange={(e) => setLocalMode(e.target.checked)}
+                disabled={!isOnline}
+                className="w-4 h-4 rounded border-[var(--border)] bg-[var(--background)] text-[var(--accent)] focus:ring-[var(--accent)] disabled:opacity-50"
+              />
+              <label htmlFor="localMode" className="text-[var(--muted)]">
+                Local Mode (offline, same device)
+                {!isOnline && <span className="ml-2 text-[var(--accent)] text-xs">• Auto-enabled (offline)</span>}
+              </label>
+            </div>
+
             <div className="flex items-center gap-4">
               <label className="text-[var(--muted)]">Starting Range:</label>
               <Input

@@ -4,6 +4,7 @@ import { PlayerMessage, HostMessage } from "@/types/messages";
 import { GameState } from "@/types/game";
 import { safeParsePlayerMessage } from "../validation";
 import { logger } from "../logger";
+import { ICommunicationProvider } from "./ICommunicationProvider";
 
 export type ConnectionStatus = "connecting" | "open" | "error" | "closed";
 
@@ -34,7 +35,7 @@ export interface HostPeerCallbacks {
   onError: (error: Error) => void;
 }
 
-export class HostPeer {
+export class HostPeer implements ICommunicationProvider {
   private peer: Peer | null = null;
   private connections: Map<string, DataConnection> = new Map();
   private callbacks: HostPeerCallbacks;

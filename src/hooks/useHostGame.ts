@@ -2,6 +2,8 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { HostPeer, ConnectionStatus } from "@/lib/peer/HostPeer";
+import { LocalCommunicationProvider } from "@/lib/peer/LocalCommunicationProvider";
+import { ICommunicationProvider } from "@/lib/peer/ICommunicationProvider";
 import { generateRoomCode } from "@/lib/game/roomCode";
 import {
   GameState,
@@ -44,7 +46,12 @@ import { playerNameSchema } from "@/lib/validation";
 import { logger } from "@/lib/logger";
 import { trackRoll, trackGameEnd, calculateDeficitOvercome } from "@/lib/statistics";
 
-export function useHostGame() {
+export interface UseHostGameOptions {
+  localMode?: boolean;
+}
+
+export function useHostGame(options: UseHostGameOptions = {}) {
+  const { localMode = false } = options;
   // Track game start time for duration calculation
   const gameStartTimeRef = useRef<number | null>(null);
   const roundStartTimeRef = useRef<number | null>(null);
@@ -54,7 +61,7 @@ export function useHostGame() {
   const [error, setError] = useState<string | null>(null);
   const [savedState, setSavedState] = useState<SavedHostState | null>(null);
 
-  const hostRef = useRef<HostPeer | null>(null);
+  const communicationProviderRef = useRef<ICommunicationProvider | null>(null);
   const gameStateRef = useRef<GameState>(gameState);
 
   // Check for saved state on mount
@@ -78,7 +85,7 @@ export function useHostGame() {
   }, [gameState, roomCode, status]);
 
   const broadcastState = useCallback((state: GameState) => {
-    hostRef.current?.broadcastState(state);
+    communicationProviderRef.current?.broadcastState(state);
   }, []);
 
   const updateState = useCallback(
@@ -98,9 +105,10 @@ export function useHostGame() {
     setError(null);
     setStatus("connecting");
 
-    const host = new HostPeer(code, {
+    // Define callbacks that will be used by both providers
+    const callbacks = {
       onStatusChange: setStatus,
-      onPlayerReconnect: (peerId, name, playerId, accept, reject) => {
+      onPlayerReconnect: (peerId: string, name: string, playerId: string | null | undefined, accept: (id: string) => void, reject: (reason: string) => void) => {
         const currentState = gameStateRef.current;
 
         // Look for existing player by ID (even if still marked connected - could be stale)
@@ -132,8 +140,8 @@ export function useHostGame() {
             // Force disconnect old connection and reconnect with new peerId
             let newState = setPlayerConnected(prev, existingPlayer!.id, false);
             newState = reconnectPlayer(newState, existingPlayer!.id, peerId);
-            host.reconnectPlayer(peerId, existingPlayer!.id, newState);
-            host.broadcastState(newState);
+            provider.reconnectPlayer(peerId, existingPlayer!.id, newState);
+            provider.broadcastState(newState);
             return newState;
           });
         } else {
@@ -142,7 +150,7 @@ export function useHostGame() {
           reject("Not a reconnection");
         }
       },
-      onPlayerJoinRequest: (peerId, name, spectator, accept, reject) => {
+      onPlayerJoinRequest: (peerId: string, name: string, spectator: boolean, accept: () => void, reject: (reason: string) => void) => {
         // Validate player name
         const nameValidation = playerNameSchema.safeParse(name);
         if (!nameValidation.success) {
@@ -179,12 +187,12 @@ export function useHostGame() {
           };
 
           const newState = addPlayer(prev, player);
-          host.acceptPlayer(peerId, playerId, newState);
-          host.broadcastState(newState);
+          provider.acceptPlayer(peerId, playerId, newState);
+          provider.broadcastState(newState);
           return newState;
         });
       },
-      onPlayerDisconnect: (peerId) => {
+      onPlayerDisconnect: (peerId: string) => {
         setGameState((prev) => {
           const player = prev.players.find((p) => p.connectionId === peerId);
           if (!player) return prev;
@@ -195,31 +203,36 @@ export function useHostGame() {
           // Skip to next player if the disconnected player was current
           newState = skipDisconnectedPlayer(newState);
 
-          host.broadcastState(newState);
+          provider.broadcastState(newState);
           return newState;
         });
       },
-      onPlayerMessage: (peerId, message) => {
+      onPlayerMessage: (peerId: string, message: PlayerMessage) => {
         handlePlayerMessage(peerId, message);
       },
-      onError: (err) => {
+      onError: (err: Error) => {
         setError(err.message);
       },
-    });
+    };
 
-    hostRef.current = host;
+    // Create appropriate communication provider based on mode
+    const provider: ICommunicationProvider = localMode
+      ? new LocalCommunicationProvider(code, callbacks)
+      : new HostPeer(code, callbacks);
+
+    communicationProviderRef.current = provider;
 
     try {
-      await host.connect();
+      await provider.connect();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create room");
       setRoomCode(null);
     }
-  }, []);
+  }, [localMode]);
 
   const handlePlayerMessage = useCallback((peerId: string, message: PlayerMessage) => {
-    const host = hostRef.current;
-    if (!host) return;
+    const provider = communicationProviderRef.current;
+    if (!provider) return;
 
     switch (message.type) {
       case "ROLL_REQUEST": {
@@ -239,7 +252,7 @@ export function useHostGame() {
           if (newState) {
             console.log("[Host] Player skipped roll:", player.name);
             setGameState(newState);
-            host.broadcastState(newState);
+            provider.broadcastState(newState);
           }
           break;
         }
@@ -268,7 +281,7 @@ export function useHostGame() {
         // Phase 1: Initiate roll (starts animation)
         const { state: stateWithRoll, rollResult, rollTwiceResults } = initiateRoll(currentState, player.id);
         setGameState(stateWithRoll);
-        host.broadcastState(stateWithRoll);
+        provider.broadcastState(stateWithRoll);
 
         // Track roll in statistics (using rollResult, not stateWithRoll.lastRoll which is null in Phase 1)
         if (rollResult !== null && stateWithRoll.lastMaxRoll !== null) {
@@ -292,7 +305,7 @@ export function useHostGame() {
                 rollTwiceResults: rollTwiceResults, // Explicitly preserve the roll options
               };
               setGameState(stateAfterAnimation);
-              host.broadcastState(stateAfterAnimation);
+              provider.broadcastState(stateAfterAnimation);
               return;
             }
 
@@ -348,17 +361,17 @@ export function useHostGame() {
           }
 
             setGameState(finalState);
-            host.broadcastState(finalState);
+            provider.broadcastState(finalState);
 
             // Failsafe: After a small delay, broadcast again to ensure sync
             // This helps if any client's animation got stuck
             setTimeout(() => {
-              host.broadcastState(gameStateRef.current);
+              provider.broadcastState(gameStateRef.current);
             }, 200);
           } catch (error) {
             console.error('[Host] Phase 2 failed:', error);
             // On error, try to recover by broadcasting current state
-            host.broadcastState(gameStateRef.current);
+            provider.broadcastState(gameStateRef.current);
           }
         }, animationDuration);
 
@@ -376,7 +389,7 @@ export function useHostGame() {
         const newState = { ...currentState, currentMaxRoll: message.maxRange };
         console.log("[Host] Remote set range:", message.maxRange);
         setGameState(newState);
-        host.broadcastState(newState);
+        provider.broadcastState(newState);
         break;
       }
 
@@ -397,7 +410,7 @@ export function useHostGame() {
         // Complete the roll with the chosen result
         const newState = completeRoll(currentState, player.id, message.chosenRoll);
         setGameState(newState);
-        host.broadcastState(newState);
+        provider.broadcastState(newState);
         break;
       }
     }
@@ -435,7 +448,7 @@ export function useHostGame() {
         coins: prev.initialCoins,
       };
       const newState = addPlayer(prev, player);
-      hostRef.current?.broadcastState(newState);
+      communicationProviderRef.current?.broadcastState(newState);
       return newState;
     });
   }, []);
@@ -451,8 +464,8 @@ export function useHostGame() {
   }, [updateState]);
 
   const handleLocalRoll = useCallback((playerId: string, overrideRange?: number | null, rollTwice?: boolean, nextPlayerOverride?: string | null, skipRoll?: boolean) => {
-    const host = hostRef.current;
-    if (!host) return;
+    const provider = communicationProviderRef.current;
+    if (!provider) return;
 
     let currentState = gameStateRef.current;
     if (!isPlayerTurn(currentState, playerId)) return;
@@ -468,7 +481,7 @@ export function useHostGame() {
       if (newState) {
         console.log("[Host] Local player skipped roll");
         setGameState(newState);
-        host.broadcastState(newState);
+        provider.broadcastState(newState);
       }
       return;
     }
@@ -498,7 +511,7 @@ export function useHostGame() {
     // Phase 1: Initiate roll (starts animation)
     const { state: stateWithRoll, rollResult, rollTwiceResults } = initiateRoll(currentState, playerId);
     setGameState(stateWithRoll);
-    host.broadcastState(stateWithRoll);
+    provider.broadcastState(stateWithRoll);
 
     // Track roll in statistics (using rollResult, not stateWithRoll.lastRoll which is null in Phase 1)
     if (rollResult !== null && stateWithRoll.lastMaxRoll !== null) {
@@ -522,7 +535,7 @@ export function useHostGame() {
             rollTwiceResults: rollTwiceResults, // Explicitly preserve the roll options
           };
           setGameState(stateAfterAnimation);
-          host.broadcastState(stateAfterAnimation);
+          provider.broadcastState(stateAfterAnimation);
           return;
         }
 
@@ -578,16 +591,16 @@ export function useHostGame() {
       }
 
         setGameState(finalState);
-        host.broadcastState(finalState);
+        provider.broadcastState(finalState);
 
         // Failsafe: After a small delay, broadcast again to ensure sync
         setTimeout(() => {
-          host.broadcastState(gameStateRef.current);
+          provider.broadcastState(gameStateRef.current);
         }, 200);
       } catch (error) {
         console.error('[Host] Phase 2 failed:', error);
         // On error, try to recover by broadcasting current state
-        host.broadcastState(gameStateRef.current);
+        provider.broadcastState(gameStateRef.current);
       }
     }, animationDuration);
   }, []);
@@ -605,8 +618,8 @@ export function useHostGame() {
   }, [updateState]);
 
   const kickPlayer = useCallback((playerId: string, reason: string = "Kicked by host") => {
-    const host = hostRef.current;
-    if (!host) return;
+    const provider = communicationProviderRef.current;
+    if (!provider) return;
 
     setGameState((prev) => {
       const player = prev.players.find((p) => p.id === playerId);
@@ -614,19 +627,19 @@ export function useHostGame() {
 
       // Send kick message to the player
       if (player.connectionId) {
-        host.kickPlayer(player.connectionId, reason);
+        provider.kickPlayer(player.connectionId, reason);
       }
 
       // Remove from game state
       const newState = removePlayer(prev, playerId);
-      host.broadcastState(newState);
+      provider.broadcastState(newState);
       return newState;
     });
   }, []);
 
   const disconnect = useCallback(() => {
-    hostRef.current?.disconnect();
-    hostRef.current = null;
+    communicationProviderRef.current?.disconnect();
+    communicationProviderRef.current = null;
     setRoomCode(null);
     setStatus("closed");
     setGameState(createInitialGameState());
@@ -645,9 +658,10 @@ export function useHostGame() {
     setError(null);
     setStatus("connecting");
 
-    const host = new HostPeer(savedState.roomCode, {
+    // Define callbacks that will be used by both providers
+    const callbacks = {
       onStatusChange: setStatus,
-      onPlayerReconnect: (peerId, name, playerId, accept, reject) => {
+      onPlayerReconnect: (peerId: string, name: string, playerId: string | null | undefined, accept: (id: string) => void, reject: (reason: string) => void) => {
         const currentState = gameStateRef.current;
 
         // Look for existing player by ID (even if still marked connected - could be stale)
@@ -679,8 +693,8 @@ export function useHostGame() {
             // Force disconnect old connection and reconnect with new peerId
             let newState = setPlayerConnected(prev, existingPlayer!.id, false);
             newState = reconnectPlayer(newState, existingPlayer!.id, peerId);
-            host.reconnectPlayer(peerId, existingPlayer!.id, newState);
-            host.broadcastState(newState);
+            provider.reconnectPlayer(peerId, existingPlayer!.id, newState);
+            provider.broadcastState(newState);
             return newState;
           });
         } else {
@@ -689,7 +703,7 @@ export function useHostGame() {
           reject("Not a reconnection");
         }
       },
-      onPlayerJoinRequest: (peerId, name, spectator, accept, reject) => {
+      onPlayerJoinRequest: (peerId: string, name: string, spectator: boolean, accept: () => void, reject: (reason: string) => void) => {
         // Validate player name
         const nameValidation = playerNameSchema.safeParse(name);
         if (!nameValidation.success) {
@@ -726,12 +740,12 @@ export function useHostGame() {
           };
 
           const newState = addPlayer(prev, player);
-          host.acceptPlayer(peerId, playerId, newState);
-          host.broadcastState(newState);
+          provider.acceptPlayer(peerId, playerId, newState);
+          provider.broadcastState(newState);
           return newState;
         });
       },
-      onPlayerDisconnect: (peerId) => {
+      onPlayerDisconnect: (peerId: string) => {
         setGameState((prev) => {
           const player = prev.players.find((p) => p.connectionId === peerId);
           if (!player) return prev;
@@ -742,28 +756,33 @@ export function useHostGame() {
           // Skip to next player if the disconnected player was current
           newState = skipDisconnectedPlayer(newState);
 
-          host.broadcastState(newState);
+          provider.broadcastState(newState);
           return newState;
         });
       },
-      onPlayerMessage: (peerId, message) => {
+      onPlayerMessage: (peerId: string, message: PlayerMessage) => {
         handlePlayerMessage(peerId, message);
       },
-      onError: (err) => {
+      onError: (err: Error) => {
         setError(err.message);
       },
-    });
+    };
 
-    hostRef.current = host;
+    // Create appropriate communication provider based on mode
+    const provider: ICommunicationProvider = localMode
+      ? new LocalCommunicationProvider(savedState.roomCode, callbacks)
+      : new HostPeer(savedState.roomCode, callbacks);
+
+    communicationProviderRef.current = provider;
 
     try {
-      await host.connect();
+      await provider.connect();
       setSavedState(null); // Clear prompt after successful restore
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to restore room");
       setRoomCode(null);
     }
-  }, [savedState, handlePlayerMessage]);
+  }, [savedState, handlePlayerMessage, localMode]);
 
   const discardSavedState = useCallback(() => {
     clearHostState();
@@ -800,8 +819,8 @@ export function useHostGame() {
 
 
   const handleLocalChooseRoll = useCallback((playerId: string, chosenRoll: number) => {
-    const host = hostRef.current;
-    if (!host) return;
+    const provider = communicationProviderRef.current;
+    if (!provider) return;
 
     const currentState = gameStateRef.current;
 
@@ -810,7 +829,7 @@ export function useHostGame() {
 
     const newState = completeRoll(currentState, playerId, chosenRoll);
     setGameState(newState);
-    host.broadcastState(newState);
+    provider.broadcastState(newState);
   }, []);
 
   return {
