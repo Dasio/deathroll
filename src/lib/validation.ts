@@ -37,6 +37,7 @@ const rollRequestSchema = z.object({
   overrideRange: z.number().int().positive().max(1000000).nullish(),
   rollTwice: z.boolean().optional(),
   nextPlayerOverride: z.string().nullish(),
+  skipRoll: z.boolean().optional(),
 });
 
 const setRangeSchema = z.object({
@@ -105,6 +106,11 @@ const heartbeatAckSchema = z.object({
   type: z.literal("HEARTBEAT_ACK"),
 });
 
+const pongSchema = z.object({
+  type: z.literal("PONG"),
+  timestamp: z.number(),
+});
+
 export const hostMessageSchema = z.discriminatedUnion("type", [
   joinAcceptedSchema,
   reconnectAcceptedSchema,
@@ -113,6 +119,7 @@ export const hostMessageSchema = z.discriminatedUnion("type", [
   gameOverSchema,
   kickSchema,
   heartbeatAckSchema,
+  pongSchema,
 ]);
 
 /**
@@ -146,12 +153,7 @@ export function parseHostMessage(data: unknown) {
  * Safe parse with error details
  */
 export function safeParsePlayerMessage(data: unknown) {
-  console.log("[Validation] Parsing player message:", JSON.stringify(data, null, 2));
-  const result = playerMessageSchema.safeParse(data);
-  if (!result.success) {
-    console.error("[Validation] Schema validation failed:", result.error);
-  }
-  return result;
+  return playerMessageSchema.safeParse(data);
 }
 
 export function safeParseHostMessage(data: unknown) {

@@ -50,9 +50,10 @@ export class PlayerPeer {
   private latencyHistory: number[] = [];
   private readonly MAX_LATENCY_SAMPLES = 10;
   private networkQuality: NetworkQuality = "excellent";
-  private pingInterval: ReturnType<typeof setInterval> | null = null;
   private onlineListener: (() => void) | null = null;
   private offlineListener: (() => void) | null = null;
+  private visibilityListener: (() => void) | null = null;
+  private healthCheckTimeout: ReturnType<typeof setTimeout> | null = null;
   private messageSequence: number = 0;
   private lastReceivedSequence: number = 0;
 
@@ -75,16 +76,64 @@ export class PlayerPeer {
       this.updateNetworkQuality("offline");
     };
 
+    this.visibilityListener = () => {
+      if (document.visibilityState === "hidden") {
+        logger.debug("[Player] Page hidden, pausing heartbeat");
+        this.stopHeartbeat();
+      } else if (document.visibilityState === "visible") {
+        logger.debug("[Player] Page visible, checking connection health");
+        this.handlePageVisible();
+      }
+    };
+
     if (typeof window !== "undefined") {
       window.addEventListener("online", this.onlineListener);
       window.addEventListener("offline", this.offlineListener);
+      document.addEventListener("visibilitychange", this.visibilityListener);
+    }
+  }
+
+  private handlePageVisible() {
+    if (this.hostConnection?.open) {
+      // Connection appears open - send immediate heartbeat and wait for ACK
+      this.lastHeartbeatTime = Date.now();
+      this.sendToHost({ type: "HEARTBEAT" });
+
+      // Set 5s timeout - if no ACK, connection is silently dead
+      this.clearHealthCheckTimeout();
+      this.healthCheckTimeout = setTimeout(() => {
+        logger.debug("[Player] Health check timeout - connection appears dead after visibility change");
+        this.hostConnection?.close();
+        // close event will trigger attemptReconnect
+      }, 5000);
+    } else if (!this.isManualDisconnect) {
+      // Connection already dead - trigger reconnect immediately
+      logger.debug("[Player] Connection dead after visibility change, reconnecting");
+      this.attemptReconnect();
+    }
+
+    // Restart heartbeat interval
+    this.startHeartbeat();
+  }
+
+  private clearHealthCheckTimeout() {
+    if (this.healthCheckTimeout) {
+      clearTimeout(this.healthCheckTimeout);
+      this.healthCheckTimeout = null;
     }
   }
 
   private cleanupNetworkListeners() {
-    if (typeof window !== "undefined" && this.onlineListener && this.offlineListener) {
-      window.removeEventListener("online", this.onlineListener);
-      window.removeEventListener("offline", this.offlineListener);
+    if (typeof window !== "undefined") {
+      if (this.onlineListener) {
+        window.removeEventListener("online", this.onlineListener);
+      }
+      if (this.offlineListener) {
+        window.removeEventListener("offline", this.offlineListener);
+      }
+      if (this.visibilityListener) {
+        document.removeEventListener("visibilitychange", this.visibilityListener);
+      }
     }
   }
 
@@ -211,7 +260,6 @@ export class PlayerPeer {
         this.callbacks.onJoinAccepted(message.playerId, message.state);
         // Start heartbeat after successful join
         this.startHeartbeat();
-        this.startPingMonitoring();
         break;
 
       case "RECONNECT_ACCEPTED":
@@ -221,7 +269,6 @@ export class PlayerPeer {
         this.updateReconnectionState();
         // Start heartbeat after successful reconnection
         this.startHeartbeat();
-        this.startPingMonitoring();
         break;
 
       case "JOIN_REJECTED":
@@ -229,7 +276,6 @@ export class PlayerPeer {
         // Don't call full disconnect - just clean up without triggering "closed" status
         this.isManualDisconnect = true;
         this.stopHeartbeat();
-        this.stopPingMonitoring();
         this.hostConnection?.close();
         this.hostConnection = null;
         this.peer?.destroy();
@@ -250,6 +296,8 @@ export class PlayerPeer {
         break;
 
       case "HEARTBEAT_ACK":
+        // Connection is alive - clear any pending health check
+        this.clearHealthCheckTimeout();
         // Calculate latency
         if (this.lastHeartbeatTime > 0) {
           const latency = Date.now() - this.lastHeartbeatTime;
@@ -265,14 +313,23 @@ export class PlayerPeer {
     }
   }
 
-  sendToHost(message: PlayerMessage) {
+  sendToHost(message: PlayerMessage): boolean {
     if (this.hostConnection?.open) {
       this.hostConnection.send(message);
+      return true;
     }
+    if (message.type !== "HEARTBEAT") {
+      logger.debug("[Player] Message dropped (connection not open):", message.type);
+    }
+    return false;
   }
 
-  requestRoll(overrideRange?: number | null, rollTwice?: boolean, nextPlayerOverride?: string | null, skipRoll?: boolean) {
-    this.sendToHost({ type: "ROLL_REQUEST", overrideRange, rollTwice, nextPlayerOverride, skipRoll });
+  requestRoll(overrideRange?: number | null, rollTwice?: boolean, nextPlayerOverride?: string | null, skipRoll?: boolean): boolean {
+    const sent = this.sendToHost({ type: "ROLL_REQUEST", overrideRange, rollTwice, nextPlayerOverride, skipRoll });
+    if (!sent && !this.isManualDisconnect) {
+      this.attemptReconnect();
+    }
+    return sent;
   }
 
   setRange(maxRange: number) {
@@ -284,33 +341,19 @@ export class PlayerPeer {
   }
 
   private startHeartbeat() {
+    this.stopHeartbeat(); // Prevent double-start
     this.heartbeatInterval = setInterval(() => {
-      this.lastHeartbeatTime = Date.now();
-      this.sendToHost({ type: "HEARTBEAT" });
-    }, 30000); // Send heartbeat every 30 seconds
+      if (this.hostConnection?.open) {
+        this.lastHeartbeatTime = Date.now();
+        this.sendToHost({ type: "HEARTBEAT" });
+      }
+    }, 15000); // Send heartbeat every 15 seconds
   }
 
   private stopHeartbeat() {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
-    }
-  }
-
-  private startPingMonitoring() {
-    // Additional ping monitoring every 10 seconds
-    this.pingInterval = setInterval(() => {
-      if (this.hostConnection?.open) {
-        this.lastHeartbeatTime = Date.now();
-        this.sendToHost({ type: "HEARTBEAT" });
-      }
-    }, 10000);
-  }
-
-  private stopPingMonitoring() {
-    if (this.pingInterval) {
-      clearInterval(this.pingInterval);
-      this.pingInterval = null;
     }
   }
 
@@ -423,7 +466,6 @@ export class PlayerPeer {
       try {
         // Clean up old connection
         this.stopHeartbeat();
-        this.stopPingMonitoring();
         this.hostConnection?.close();
         this.hostConnection = null;
         this.peer?.destroy();
@@ -459,7 +501,6 @@ export class PlayerPeer {
 
     // Clean up old connection
     this.stopHeartbeat();
-    this.stopPingMonitoring();
     this.hostConnection?.close();
     this.hostConnection = null;
     this.peer?.destroy();
@@ -477,8 +518,8 @@ export class PlayerPeer {
   disconnect() {
     this.isManualDisconnect = true;
     this.stopHeartbeat();
-    this.stopPingMonitoring();
     this.clearConnectionTimeout();
+    this.clearHealthCheckTimeout();
     this.cleanupNetworkListeners();
 
     // Clear reconnection timeout

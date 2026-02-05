@@ -42,7 +42,10 @@ export class HostPeer implements ICommunicationProvider {
   private roomCode: string;
   private lastHeartbeatTimes: Map<string, number> = new Map();
   private heartbeatCheckInterval: ReturnType<typeof setInterval> | null = null;
-  private readonly HEARTBEAT_TIMEOUT_MS = 60000; // 60 seconds without heartbeat = disconnected
+  private readonly HEARTBEAT_TIMEOUT_MS = 30000; // 30 seconds without heartbeat = disconnected
+  private signalingReconnectAttempts: number = 0;
+  private readonly MAX_SIGNALING_RECONNECT_ATTEMPTS = 5;
+  private signalingReconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(roomCode: string, callbacks: HostPeerCallbacks) {
     this.roomCode = roomCode;
@@ -73,6 +76,28 @@ export class HostPeer implements ICommunicationProvider {
     }
   }
 
+  private attemptSignalingReconnect() {
+    if (this.signalingReconnectAttempts >= this.MAX_SIGNALING_RECONNECT_ATTEMPTS) {
+      logger.error("[Host] Max signaling reconnect attempts reached");
+      this.callbacks.onStatusChange("closed");
+      return;
+    }
+
+    this.signalingReconnectAttempts++;
+    // Exponential backoff: 1s, 2s, 4s, 8s, 15s
+    const delay = Math.min(1000 * Math.pow(2, this.signalingReconnectAttempts - 1), 15000);
+
+    logger.debug(
+      `[Host] Signaling reconnect attempt ${this.signalingReconnectAttempts}/${this.MAX_SIGNALING_RECONNECT_ATTEMPTS} in ${delay}ms`
+    );
+
+    this.signalingReconnectTimeout = setTimeout(() => {
+      if (this.peer && !this.peer.destroyed) {
+        this.peer.reconnect();
+      }
+    }, delay);
+  }
+
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       const peerId = getRoomPeerId(this.roomCode);
@@ -80,6 +105,7 @@ export class HostPeer implements ICommunicationProvider {
       this.peer = new Peer(peerId, peerConfig);
 
       this.peer.on("open", () => {
+        this.signalingReconnectAttempts = 0; // Reset on successful connection
         this.callbacks.onStatusChange("open");
         resolve();
       });
@@ -104,7 +130,8 @@ export class HostPeer implements ICommunicationProvider {
       });
 
       this.peer.on("disconnected", () => {
-        this.callbacks.onStatusChange("closed");
+        logger.debug("[Host] Signaling server disconnected, attempting reconnect");
+        this.attemptSignalingReconnect();
       });
 
       this.peer.on("close", () => {
@@ -270,6 +297,10 @@ export class HostPeer implements ICommunicationProvider {
 
   disconnect() {
     this.stopHeartbeatMonitoring();
+    if (this.signalingReconnectTimeout) {
+      clearTimeout(this.signalingReconnectTimeout);
+      this.signalingReconnectTimeout = null;
+    }
     this.connections.forEach((conn) => conn.close());
     this.connections.clear();
     this.lastHeartbeatTimes.clear();

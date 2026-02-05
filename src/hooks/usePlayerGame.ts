@@ -40,6 +40,12 @@ export function usePlayerGame() {
   });
 
   const playerRef = useRef<PlayerPeer | null>(null);
+  const statusRef = useRef<ConnectionStatus>(status);
+
+  // Keep statusRef in sync
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   // Check for saved session on mount
   useEffect(() => {
@@ -57,14 +63,14 @@ export function usePlayerGame() {
       setIsSpectator(activeSession.isSpectator);
     }
 
-    // Clean up active session on unmount
+    // Clean up active session on unmount only
     return () => {
-      // Only clear if we're actually disconnecting
-      if (status === "closed") {
+      if (statusRef.current === "closed") {
         clearActiveGameSession();
       }
     };
-  }, [status]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const joinRoom = useCallback(async (roomCode: string, playerName: string, spectator: boolean = false, existingPlayerId?: string) => {
     // Validate room code
