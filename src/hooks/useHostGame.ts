@@ -84,6 +84,17 @@ export function useHostGame(options: UseHostGameOptions = {}) {
     }
   }, [gameState, roomCode, status]);
 
+  // Periodic state re-broadcast for eventual consistency
+  useEffect(() => {
+    if (status !== "open") return;
+
+    const interval = setInterval(() => {
+      communicationProviderRef.current?.broadcastState(gameStateRef.current);
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [status]);
+
   const broadcastState = useCallback((state: GameState) => {
     communicationProviderRef.current?.broadcastState(state);
   }, []);

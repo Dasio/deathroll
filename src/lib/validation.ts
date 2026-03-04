@@ -111,6 +111,10 @@ const pongSchema = z.object({
   timestamp: z.number(),
 });
 
+const hostDisconnectingSchema = z.object({
+  type: z.literal("HOST_DISCONNECTING"),
+});
+
 export const hostMessageSchema = z.discriminatedUnion("type", [
   joinAcceptedSchema,
   reconnectAcceptedSchema,
@@ -120,6 +124,7 @@ export const hostMessageSchema = z.discriminatedUnion("type", [
   kickSchema,
   heartbeatAckSchema,
   pongSchema,
+  hostDisconnectingSchema,
 ]);
 
 /**

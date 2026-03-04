@@ -46,23 +46,85 @@ export class HostPeer implements ICommunicationProvider {
   private signalingReconnectAttempts: number = 0;
   private readonly MAX_SIGNALING_RECONNECT_ATTEMPTS = 5;
   private signalingReconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private onlineListener: (() => void) | null = null;
+  private visibilityListener: (() => void) | null = null;
+  private beforeUnloadListener: (() => void) | null = null;
 
   constructor(roomCode: string, callbacks: HostPeerCallbacks) {
     this.roomCode = roomCode;
     this.callbacks = callbacks;
     this.startHeartbeatMonitoring();
+    this.setupNetworkListeners();
+  }
+
+  private setupNetworkListeners() {
+    this.onlineListener = () => {
+      logger.debug("[Host] Browser went online, checking signaling connection");
+      if (this.peer && this.peer.disconnected && !this.peer.destroyed) {
+        this.peer.reconnect();
+      }
+    };
+
+    this.visibilityListener = () => {
+      if (document.visibilityState === "hidden") {
+        logger.debug("[Host] Page hidden, pausing heartbeat monitoring");
+        this.stopHeartbeatMonitoring();
+      } else if (document.visibilityState === "visible") {
+        logger.debug("[Host] Page visible, resuming heartbeat monitoring");
+        // Reset all heartbeat timestamps so we don't false-timeout players
+        // who were alive while we were backgrounded
+        const now = Date.now();
+        this.lastHeartbeatTimes.forEach((_lastTime, peerId) => {
+          this.lastHeartbeatTimes.set(peerId, now);
+        });
+        this.startHeartbeatMonitoring();
+
+        // Restore signaling connection if needed
+        if (this.peer && this.peer.disconnected && !this.peer.destroyed) {
+          this.peer.reconnect();
+        }
+      }
+    };
+
+    this.beforeUnloadListener = () => {
+      // Notify all players immediately so they don't wait for heartbeat timeout
+      this.broadcast({ type: "HOST_DISCONNECTING" });
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", this.onlineListener);
+      document.addEventListener("visibilitychange", this.visibilityListener);
+      window.addEventListener("beforeunload", this.beforeUnloadListener);
+    }
+  }
+
+  private cleanupNetworkListeners() {
+    if (typeof window !== "undefined") {
+      if (this.onlineListener) {
+        window.removeEventListener("online", this.onlineListener);
+      }
+      if (this.visibilityListener) {
+        document.removeEventListener("visibilitychange", this.visibilityListener);
+      }
+      if (this.beforeUnloadListener) {
+        window.removeEventListener("beforeunload", this.beforeUnloadListener);
+      }
+    }
   }
 
   private startHeartbeatMonitoring() {
+    this.stopHeartbeatMonitoring(); // Prevent double-start
     // Check for stale connections every 5 seconds
     this.heartbeatCheckInterval = setInterval(() => {
       const now = Date.now();
       this.lastHeartbeatTimes.forEach((lastTime, peerId) => {
         if (now - lastTime > this.HEARTBEAT_TIMEOUT_MS) {
           logger.debug("[Host] Player heartbeat timeout:", peerId);
-          // Remove from tracking and trigger disconnect
+          const conn = this.connections.get(peerId);
+          // Remove from maps before closing so conn.on("close") won't fire duplicate disconnect
           this.lastHeartbeatTimes.delete(peerId);
           this.connections.delete(peerId);
+          if (conn) conn.close();
           this.callbacks.onPlayerDisconnect(peerId);
         }
       });
@@ -166,9 +228,13 @@ export class HostPeer implements ICommunicationProvider {
     conn.on("close", () => {
       logger.debug("[Host] Connection closed:", conn.peer);
       const peerId = conn.peer;
+      // Guard against double-disconnect (e.g. heartbeat timeout already handled this)
+      const wasTracked = this.connections.has(peerId);
       this.connections.delete(peerId);
       this.lastHeartbeatTimes.delete(peerId);
-      this.callbacks.onPlayerDisconnect(peerId);
+      if (wasTracked) {
+        this.callbacks.onPlayerDisconnect(peerId);
+      }
     });
 
     conn.on("error", (err) => {
@@ -188,7 +254,7 @@ export class HostPeer implements ICommunicationProvider {
             peerId,
             message.name,
             message.playerId,
-            (existingPlayerId) => {
+            (_existingPlayerId) => {
               // This is a reconnection - accept with existing player ID
               this.connections.set(peerId, conn);
               // Callback will be handled by useHostGame
@@ -297,10 +363,13 @@ export class HostPeer implements ICommunicationProvider {
 
   disconnect() {
     this.stopHeartbeatMonitoring();
+    this.cleanupNetworkListeners();
     if (this.signalingReconnectTimeout) {
       clearTimeout(this.signalingReconnectTimeout);
       this.signalingReconnectTimeout = null;
     }
+    // Notify players before closing connections
+    this.broadcast({ type: "HOST_DISCONNECTING" });
     this.connections.forEach((conn) => conn.close());
     this.connections.clear();
     this.lastHeartbeatTimes.clear();

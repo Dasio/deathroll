@@ -42,6 +42,7 @@ export class PlayerPeer {
   private maxReconnectAttempts: number = 10;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private isManualDisconnect: boolean = false;
+  private isAutoReconnecting: boolean = false;
   private connectionTimeout: ReturnType<typeof setTimeout> | null = null;
   private readonly CONNECTION_TIMEOUT_MS = 30000; // 30 second timeout
 
@@ -54,8 +55,10 @@ export class PlayerPeer {
   private offlineListener: (() => void) | null = null;
   private visibilityListener: (() => void) | null = null;
   private healthCheckTimeout: ReturnType<typeof setTimeout> | null = null;
-  private messageSequence: number = 0;
-  private lastReceivedSequence: number = 0;
+  private stateSyncRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+  private stateSyncRetries: number = 0;
+  private readonly MAX_STATE_SYNC_RETRIES = 3;
+  private readonly STATE_SYNC_RETRY_DELAY = 3000;
 
   constructor(callbacks: PlayerPeerCallbacks) {
     this.callbacks = callbacks;
@@ -99,21 +102,25 @@ export class PlayerPeer {
       this.lastHeartbeatTime = Date.now();
       this.sendToHost({ type: "HEARTBEAT" });
 
-      // Set 5s timeout - if no ACK, connection is silently dead
+      // Adaptive timeout based on measured latency, min 5s, max 15s
+      const avgLatency = this.getLatency();
+      const healthTimeout = Math.min(Math.max(avgLatency * 3, 5000), 15000);
       this.clearHealthCheckTimeout();
       this.healthCheckTimeout = setTimeout(() => {
         logger.debug("[Player] Health check timeout - connection appears dead after visibility change");
         this.hostConnection?.close();
         // close event will trigger attemptReconnect
-      }, 5000);
+      }, healthTimeout);
     } else if (!this.isManualDisconnect) {
       // Connection already dead - trigger reconnect immediately
       logger.debug("[Player] Connection dead after visibility change, reconnecting");
       this.attemptReconnect();
     }
 
-    // Restart heartbeat interval
-    this.startHeartbeat();
+    // Only restart heartbeat if connection is still open
+    if (this.hostConnection?.open) {
+      this.startHeartbeat();
+    }
   }
 
   private clearHealthCheckTimeout() {
@@ -153,7 +160,11 @@ export class PlayerPeer {
       this.connectionTimeout = setTimeout(() => {
         this.clearConnectionTimeout();
         const err = new Error("Connection timeout: Could not connect to room within 30 seconds");
-        this.callbacks.onError(err);
+        if (!this.isAutoReconnecting) {
+          this.callbacks.onError(err);
+        } else {
+          logger.debug("[Player] Suppressed timeout error during auto-reconnect");
+        }
         reject(err);
         this.peer?.destroy();
       }, this.CONNECTION_TIMEOUT_MS);
@@ -205,11 +216,12 @@ export class PlayerPeer {
         conn.on("close", () => {
           logger.debug("[Player] Connection to host closed");
           this.stopHeartbeat();
-          this.callbacks.onStatusChange("closed");
 
-          // Attempt reconnection if not a manual disconnect
           if (!this.isManualDisconnect) {
+            // Don't set "closed" — attemptReconnect will set "reconnecting"
             this.attemptReconnect();
+          } else {
+            this.callbacks.onStatusChange("closed");
           }
         });
 
@@ -222,7 +234,12 @@ export class PlayerPeer {
 
       this.peer.on("error", (err) => {
         this.clearConnectionTimeout();
-        this.callbacks.onError(err);
+        // Don't surface expected errors during auto-reconnection
+        if (!this.isAutoReconnecting) {
+          this.callbacks.onError(err);
+        } else {
+          logger.debug("[Player] Suppressed error during auto-reconnect:", err.type);
+        }
         if (err.type === "peer-unavailable") {
           reject(new Error("Room not found. Please check the room code and try again."));
         } else if (err.type === "network") {
@@ -236,24 +253,18 @@ export class PlayerPeer {
 
       this.peer.on("disconnected", () => {
         this.stopHeartbeat();
-        this.callbacks.onStatusChange("closed");
 
-        // Attempt reconnection if not a manual disconnect
         if (!this.isManualDisconnect) {
+          // Don't set "closed" — attemptReconnect will set "reconnecting"
           this.attemptReconnect();
+        } else {
+          this.callbacks.onStatusChange("closed");
         }
       });
     });
   }
 
   private handleHostMessage(message: HostMessage) {
-    // Track sequence numbers if present
-    if ("sequence" in message && typeof message.sequence === "number") {
-      if (message.sequence > this.lastReceivedSequence) {
-        this.lastReceivedSequence = message.sequence;
-      }
-    }
-
     switch (message.type) {
       case "JOIN_ACCEPTED":
         this.playerId = message.playerId;
@@ -264,11 +275,14 @@ export class PlayerPeer {
 
       case "RECONNECT_ACCEPTED":
         this.playerId = message.playerId;
+        this.clearStateSyncRetry(); // Got state with reconnect, cancel any pending sync
         this.callbacks.onJoinAccepted(message.playerId, message.state);
         this.reconnectAttempts = 0; // Reset reconnect attempts on successful reconnection
         this.updateReconnectionState();
         // Start heartbeat after successful reconnection
         this.startHeartbeat();
+        // Request fresh state sync shortly after reconnect to ensure consistency
+        setTimeout(() => this.requestStateSync(), 1000);
         break;
 
       case "JOIN_REJECTED":
@@ -283,6 +297,7 @@ export class PlayerPeer {
         break;
 
       case "STATE_UPDATE":
+        this.clearStateSyncRetry(); // Got fresh state, cancel any pending sync retry
         this.callbacks.onStateUpdate(message.state);
         break;
 
@@ -309,6 +324,15 @@ export class PlayerPeer {
         // Alternative ping mechanism
         const latency = Date.now() - message.timestamp;
         this.updateLatency(latency);
+        break;
+
+      case "HOST_DISCONNECTING":
+        // Host is gracefully shutting down — show immediate feedback
+        logger.debug("[Player] Host is disconnecting gracefully");
+        this.isManualDisconnect = true; // Don't attempt reconnection
+        this.stopHeartbeat();
+        this.callbacks.onStatusChange("closed");
+        this.callbacks.onError(new Error("The host has ended the game."));
         break;
     }
   }
@@ -393,12 +417,13 @@ export class PlayerPeer {
     }
   }
 
-  private updateReconnectionState() {
+  private updateReconnectionState(nextAttemptDelay?: number) {
     if (this.callbacks.onReconnectionStateChange) {
       this.callbacks.onReconnectionStateChange({
         isReconnecting: this.reconnectAttempts > 0,
         attempt: this.reconnectAttempts,
         maxAttempts: this.maxReconnectAttempts,
+        nextAttemptDelay,
       });
     }
   }
@@ -415,7 +440,28 @@ export class PlayerPeer {
   }
 
   public requestStateSync() {
+    this.stateSyncRetries = 0;
+    this.requestStateSyncWithRetry();
+  }
+
+  private requestStateSyncWithRetry() {
+    this.clearStateSyncRetry();
     this.sendToHost({ type: "STATE_SYNC_REQUEST" });
+
+    if (this.stateSyncRetries < this.MAX_STATE_SYNC_RETRIES) {
+      this.stateSyncRetryTimeout = setTimeout(() => {
+        this.stateSyncRetries++;
+        logger.debug(`[Player] State sync retry ${this.stateSyncRetries}/${this.MAX_STATE_SYNC_RETRIES}`);
+        this.requestStateSyncWithRetry();
+      }, this.STATE_SYNC_RETRY_DELAY);
+    }
+  }
+
+  private clearStateSyncRetry() {
+    if (this.stateSyncRetryTimeout) {
+      clearTimeout(this.stateSyncRetryTimeout);
+      this.stateSyncRetryTimeout = null;
+    }
   }
 
   private clearConnectionTimeout() {
@@ -426,10 +472,9 @@ export class PlayerPeer {
   }
 
   private attemptReconnect() {
-    // Clear any existing reconnect timeout
+    // If there's already a reconnect timeout scheduled, don't start another chain
     if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout);
-      this.reconnectTimeout = null;
+      return;
     }
 
     // Check if we should attempt reconnection
@@ -450,19 +495,22 @@ export class PlayerPeer {
 
     this.reconnectAttempts++;
 
-    // Improved exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s, 30s...
+    // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s, 30s, 30s... (+/- 20%)
     const baseDelay = 1000 * Math.pow(2, Math.min(this.reconnectAttempts - 1, 4));
-    const delay = Math.min(baseDelay, 30000);
+    const capped = Math.min(baseDelay, 30000);
+    const jitter = capped * (0.8 + Math.random() * 0.4); // +/- 20%
+    const delay = Math.round(jitter);
 
     logger.debug(
       `Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms...`
     );
 
-    // Update reconnection state
+    // Update reconnection state with delay info for UI countdown
     this.callbacks.onStatusChange("reconnecting");
-    this.updateReconnectionState();
+    this.updateReconnectionState(delay);
 
     this.reconnectTimeout = setTimeout(async () => {
+      this.reconnectTimeout = null; // Clear so future attemptReconnect calls aren't blocked
       try {
         // Clean up old connection
         this.stopHeartbeat();
@@ -473,11 +521,13 @@ export class PlayerPeer {
 
         // Attempt to reconnect with existing player ID
         logger.debug(`Reconnecting with playerId: ${this.playerId}`);
+        this.isAutoReconnecting = true;
         await this.connect(this.roomCode!, this.playerName!, this.spectator, this.playerId || undefined);
+        this.isAutoReconnecting = false;
       } catch (err) {
+        this.isAutoReconnecting = false;
         logger.error("Reconnection failed:", err);
-        // The connect method will trigger another attemptReconnect if needed
-        this.updateReconnectionState();
+        this.attemptReconnect(); // Schedule next attempt
       }
     }, delay);
   }
@@ -511,7 +561,7 @@ export class PlayerPeer {
     this.connect(this.roomCode!, this.playerName!, this.spectator, this.playerId || undefined)
       .catch((err) => {
         logger.error("Manual reconnection failed:", err);
-        this.updateReconnectionState();
+        this.attemptReconnect(); // Schedule next attempt automatically
       });
   }
 
@@ -520,6 +570,7 @@ export class PlayerPeer {
     this.stopHeartbeat();
     this.clearConnectionTimeout();
     this.clearHealthCheckTimeout();
+    this.clearStateSyncRetry();
     this.cleanupNetworkListeners();
 
     // Clear reconnection timeout

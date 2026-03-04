@@ -20,6 +20,7 @@ export function ConnectionStatus({
 }: ConnectionStatusProps) {
   const [showReconnectionOverlay, setShowReconnectionOverlay] = useState(false);
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
 
   // Show overlay when reconnecting
   useEffect(() => {
@@ -33,6 +34,29 @@ export function ConnectionStatus({
       setTimeout(() => setShowSuccessMessage(false), 3000);
     }
   }, [reconnectionState?.isReconnecting, showReconnectionOverlay]);
+
+  // Countdown timer for next reconnect attempt
+  useEffect(() => {
+    if (!reconnectionState?.nextAttemptDelay || !reconnectionState?.isReconnecting) {
+      setCountdown(null);
+      return;
+    }
+
+    let remaining = Math.ceil(reconnectionState.nextAttemptDelay / 1000);
+    setCountdown(remaining);
+
+    const interval = setInterval(() => {
+      remaining--;
+      if (remaining <= 0) {
+        setCountdown(null);
+        clearInterval(interval);
+      } else {
+        setCountdown(remaining);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [reconnectionState?.nextAttemptDelay, reconnectionState?.attempt]);
 
   const getQualityIcon = () => {
     switch (networkQuality) {
@@ -111,6 +135,9 @@ export function ConnectionStatus({
               {reconnectionState.attempt === 1
                 ? "Attempting to reconnect to the game..."
                 : `Attempt ${reconnectionState.attempt} of ${reconnectionState.maxAttempts}`}
+              {countdown !== null && countdown > 0 && (
+                <span className="block text-sm mt-1">Next attempt in {countdown}s</span>
+              )}
             </p>
 
             {/* Progress bar */}

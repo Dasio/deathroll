@@ -18,6 +18,7 @@ export type HostMessage =
   | { type: "GAME_OVER"; loserId: string; sequence?: number }
   | { type: "KICK"; reason: string }
   | { type: "HEARTBEAT_ACK"; latency?: number }
-  | { type: "PONG"; timestamp: number };
+  | { type: "PONG"; timestamp: number }
+  | { type: "HOST_DISCONNECTING" };
 
 export type Message = PlayerMessage | HostMessage;
