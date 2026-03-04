@@ -227,7 +227,11 @@ export class PlayerPeer {
 
         conn.on("error", (err) => {
           logger.error("[Player] Connection error:", err);
-          this.callbacks.onError(err);
+          if (!this.isAutoReconnecting) {
+            this.callbacks.onError(err);
+          } else {
+            logger.debug("[Player] Suppressed connection error during auto-reconnect:", err);
+          }
           reject(err);
         });
       });
@@ -496,7 +500,7 @@ export class PlayerPeer {
     this.reconnectAttempts++;
 
     // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s, 30s, 30s... (+/- 20%)
-    const baseDelay = 1000 * Math.pow(2, Math.min(this.reconnectAttempts - 1, 4));
+    const baseDelay = 1000 * Math.pow(2, this.reconnectAttempts - 1);
     const capped = Math.min(baseDelay, 30000);
     const jitter = capped * (0.8 + Math.random() * 0.4); // +/- 20%
     const delay = Math.round(jitter);
