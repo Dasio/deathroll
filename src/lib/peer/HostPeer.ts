@@ -49,6 +49,8 @@ export class HostPeer implements ICommunicationProvider {
   private onlineListener: (() => void) | null = null;
   private visibilityListener: (() => void) | null = null;
   private beforeUnloadListener: (() => void) | null = null;
+  private isPageHidden: boolean = false;
+  private isInitialConnection: boolean = true;
 
   constructor(roomCode: string, callbacks: HostPeerCallbacks) {
     this.roomCode = roomCode;
@@ -68,9 +70,16 @@ export class HostPeer implements ICommunicationProvider {
     this.visibilityListener = () => {
       if (document.visibilityState === "hidden") {
         logger.debug("[Host] Page hidden, pausing heartbeat monitoring");
+        this.isPageHidden = true;
         this.stopHeartbeatMonitoring();
+        // Cancel any pending signaling reconnect — don't waste attempts while backgrounded
+        if (this.signalingReconnectTimeout) {
+          clearTimeout(this.signalingReconnectTimeout);
+          this.signalingReconnectTimeout = null;
+        }
       } else if (document.visibilityState === "visible") {
         logger.debug("[Host] Page visible, resuming heartbeat monitoring");
+        this.isPageHidden = false;
         // Reset all heartbeat timestamps so we don't false-timeout players
         // who were alive while we were backgrounded
         const now = Date.now();
@@ -79,7 +88,8 @@ export class HostPeer implements ICommunicationProvider {
         });
         this.startHeartbeatMonitoring();
 
-        // Restore signaling connection if needed
+        // Reset signaling reconnect counter and restore connection if needed
+        this.signalingReconnectAttempts = 0;
         if (this.peer && this.peer.disconnected && !this.peer.destroyed) {
           this.peer.reconnect();
         }
@@ -139,6 +149,13 @@ export class HostPeer implements ICommunicationProvider {
   }
 
   private attemptSignalingReconnect() {
+    // Don't waste reconnect attempts while page is backgrounded —
+    // the visibility handler will reconnect when the user returns
+    if (this.isPageHidden) {
+      logger.debug("[Host] Page hidden, deferring signaling reconnect to visibility restore");
+      return;
+    }
+
     if (this.signalingReconnectAttempts >= this.MAX_SIGNALING_RECONNECT_ATTEMPTS) {
       logger.error("[Host] Max signaling reconnect attempts reached");
       this.callbacks.onStatusChange("closed");
@@ -168,6 +185,7 @@ export class HostPeer implements ICommunicationProvider {
 
       this.peer.on("open", () => {
         this.signalingReconnectAttempts = 0; // Reset on successful connection
+        this.isInitialConnection = false;
         this.callbacks.onStatusChange("open");
         resolve();
       });
@@ -177,17 +195,20 @@ export class HostPeer implements ICommunicationProvider {
       });
 
       this.peer.on("error", (err) => {
-        this.callbacks.onError(err);
         if (err.type === "unavailable-id") {
+          this.callbacks.onError(err);
           this.callbacks.onStatusChange("error");
           reject(new Error("Room code already in use"));
-        } else if (err.type === "peer-unavailable") {
-          // This shouldn't happen for host, but handle it
+        } else if (this.isInitialConnection) {
+          // Fatal error during initial connection
+          this.callbacks.onError(err);
           this.callbacks.onStatusChange("error");
           reject(err);
         } else {
-          this.callbacks.onStatusChange("error");
-          reject(err);
+          // Runtime error (e.g. signaling WebSocket drop on tab switch) —
+          // don't set status to "error", the "disconnected" handler will
+          // manage reconnection to the signaling server
+          logger.debug("[Host] Non-fatal runtime error:", err.type, err.message);
         }
       });
 

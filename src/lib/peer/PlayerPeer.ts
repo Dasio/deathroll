@@ -55,6 +55,7 @@ export class PlayerPeer {
   private offlineListener: (() => void) | null = null;
   private visibilityListener: (() => void) | null = null;
   private healthCheckTimeout: ReturnType<typeof setTimeout> | null = null;
+  private isPageHidden: boolean = false;
   private stateSyncRetryTimeout: ReturnType<typeof setTimeout> | null = null;
   private stateSyncRetries: number = 0;
   private readonly MAX_STATE_SYNC_RETRIES = 3;
@@ -82,9 +83,16 @@ export class PlayerPeer {
     this.visibilityListener = () => {
       if (document.visibilityState === "hidden") {
         logger.debug("[Player] Page hidden, pausing heartbeat");
+        this.isPageHidden = true;
         this.stopHeartbeat();
+        // Cancel any pending reconnect — don't waste attempts while backgrounded
+        if (this.reconnectTimeout) {
+          clearTimeout(this.reconnectTimeout);
+          this.reconnectTimeout = null;
+        }
       } else if (document.visibilityState === "visible") {
         logger.debug("[Player] Page visible, checking connection health");
+        this.isPageHidden = false;
         this.handlePageVisible();
       }
     };
@@ -97,6 +105,9 @@ export class PlayerPeer {
   }
 
   private handlePageVisible() {
+    // Reset reconnect counter — backgrounding shouldn't count against the user
+    this.reconnectAttempts = 0;
+
     if (this.hostConnection?.open) {
       // Connection appears open - send immediate heartbeat and wait for ACK
       this.lastHeartbeatTime = Date.now();
@@ -238,6 +249,18 @@ export class PlayerPeer {
 
       this.peer.on("error", (err) => {
         this.clearConnectionTimeout();
+
+        // After initial connection, network/signaling errors are transient —
+        // the "disconnected" handler and visibility restore will manage reconnection.
+        // Don't surface them as errors that would reset the UI.
+        const isTransientRuntime = this.hostConnection !== null &&
+          (err.type === "network" || err.type === "server-error" || err.type === "socket-error");
+
+        if (isTransientRuntime) {
+          logger.debug("[Player] Non-fatal runtime error:", err.type, err.message);
+          return;
+        }
+
         // Don't surface expected errors during auto-reconnection
         if (!this.isAutoReconnecting) {
           this.callbacks.onError(err);
@@ -258,11 +281,15 @@ export class PlayerPeer {
       this.peer.on("disconnected", () => {
         this.stopHeartbeat();
 
-        if (!this.isManualDisconnect) {
+        if (this.isManualDisconnect) {
+          this.callbacks.onStatusChange("closed");
+        } else if (this.isPageHidden) {
+          // Don't waste reconnect attempts while backgrounded —
+          // handlePageVisible will reconnect when the user returns
+          logger.debug("[Player] Signaling disconnected while page hidden, deferring reconnect");
+        } else {
           // Don't set "closed" — attemptReconnect will set "reconnecting"
           this.attemptReconnect();
-        } else {
-          this.callbacks.onStatusChange("closed");
         }
       });
     });
